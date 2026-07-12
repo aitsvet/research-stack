@@ -1,0 +1,7 @@
+# Secrets and runtime state
+.env
+config/
+__pycache__/
+.venv/
+pdfs/
+.discovery/

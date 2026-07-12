@@ -1,0 +1,16 @@
+services:
+  zotero:
+    image: lscr.io/linuxserver/zotero:latest
+    container_name: zotero
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=${TZ:-Etc/UTC}
+      - CUSTOM_USER=${ZOTERO_USER:-zotero}
+      - PASSWORD=${ZOTERO_PASSWORD}
+      - CUSTOM_HTTPS_PORT=8888
+    volumes:
+      - ./config:/config
+    network_mode: host
+    shm_size: "1gb"
+    restart: unless-stopped
