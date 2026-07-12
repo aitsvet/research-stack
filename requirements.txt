@@ -1,0 +1,10 @@
+# PDF -> Markdown text-layer extraction for `extract_texts.py md` (pure python, no GPU/OCR)
+pymupdf4llm==1.27.2.3
+pymupdf==1.27.2.3
+
+# HTML->Markdown conversion for chandra_ocr.py (OCR returns HTML)
+beautifulsoup4==4.15.0
+Pillow==11.3.0  # page montage + orientation fix for chandra_ocr/pdf tooling
+
+# Raw CDP driver for the container Chromium (cdp_eval.py)
+websocket-client==1.9.0
