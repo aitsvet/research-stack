@@ -8,3 +8,6 @@ Pillow==11.3.0  # page montage + orientation fix for chandra_ocr/pdf tooling
 
 # Raw CDP driver for the container Chromium (cdp_eval.py)
 websocket-client==1.9.0
+
+# Deck pipeline (scripts/deck/): pptx geometry observe/lint + measured layout
+python-pptx==1.0.2
