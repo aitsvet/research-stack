@@ -109,11 +109,64 @@ def pdf_to_markdown(pdf_path, sep_dashes=SEP_DASHES):
     return "\n\n" + "\n\n".join(parts) + "\n"
 
 
+def _is_spread(page, ratio=1.15):
+    """Two book pages photographed/typeset side by side on one PDF page.
+
+    Detected by landscape page box plus text blocks living in both halves.
+    """
+    if page.rect.width < page.rect.height * ratio:
+        return False
+    mid = page.rect.width / 2
+    left = right = False
+    for b in page.get_text("blocks"):
+        if not b[4].strip():
+            continue
+        if b[0] < mid * 0.9:
+            left = True
+        elif b[0] > mid * 1.05:
+            right = True
+    return left and right
+
+
+def split_spreads(pdf_path, out_path):
+    """Cut two-up spreads into single pages, preserving reading order.
+
+    Why this matters: extracting a spread directly interleaves the left and
+    right page top-to-bottom, so sentences break mid-clause and paragraphs from
+    facing pages get stitched together. A quote pulled from such text looks
+    genuine and is nonsense. Splitting first lets the normal pipeline read each
+    book page in order.
+
+    Lossless: pages are re-imaged by reference (`show_pdf_page`), nothing is
+    re-rendered or re-encoded. Non-spread pages are copied through untouched.
+    """
+    import fitz
+    src = fitz.open(str(pdf_path))
+    out = fitz.open()
+    n = 0
+    for page in src:
+        if not _is_spread(page):
+            out.insert_pdf(src, from_page=page.number, to_page=page.number)
+            continue
+        n += 1
+        mid = page.rect.width / 2
+        halves = (fitz.Rect(page.rect.x0, page.rect.y0, mid, page.rect.y1),
+                  fitz.Rect(mid, page.rect.y0, page.rect.x1, page.rect.y1))
+        for rect in halves:
+            new = out.new_page(width=rect.width, height=rect.height)
+            new.show_pdf_page(new.rect, src, page.number, clip=rect)
+    out.save(str(out_path))
+    out.close(); src.close()
+    return n
+
+
 def cmd_md(argv):
     import argparse
     ap = argparse.ArgumentParser(prog="extract_texts.py md",
         description="Convert PDFs to paginated Markdown via pymupdf4llm (no OCR).")
     ap.add_argument("paths", nargs="+", help="PDF files and/or directories of PDFs")
+    ap.add_argument("--spreads", choices=["auto", "always", "never"], default="auto",
+                    help="split two-up spreads into single pages first (default: auto)")
     ap.add_argument("--out", default=None,
                     help="output dir (default: alongside each source PDF)")
     ap.add_argument("--suffix", default=".txt",
@@ -136,11 +189,31 @@ def cmd_md(argv):
 
     n_ok = 0
     for pdf in targets:
+        tmp = None
         try:
-            md = pdf_to_markdown(pdf)
+            if args.spreads != "never":
+                import tempfile
+                tmp = os.path.join(tempfile.gettempdir(),
+                                   os.path.basename(pdf) + ".split.pdf")
+                n_split = split_spreads(pdf, tmp)
+                if n_split or args.spreads == "always":
+                    print(f"  {os.path.basename(pdf)}: spreads split: {n_split}",
+                          file=sys.stderr)
+                    pdf_src = tmp
+                else:
+                    pdf_src = pdf
+            else:
+                pdf_src = pdf
+            md = pdf_to_markdown(pdf_src)
         except Exception as e:
             print(f"  FAIL {os.path.basename(pdf)}: {e}", file=sys.stderr)
             continue
+        finally:
+            if tmp and os.path.exists(tmp):
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
         if args.stdout:
             sys.stdout.write(md)
             n_ok += 1
