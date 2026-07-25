@@ -1,4 +1,7 @@
 services:
+  ############################
+  # Zotero — reference manager with MCP plugin
+  ############################
   zotero:
     image: lscr.io/linuxserver/zotero:latest
     container_name: zotero
@@ -14,3 +17,105 @@ services:
     network_mode: host
     shm_size: "1gb"
     restart: unless-stopped
+
+  ############################
+  # Open WebUI — AI chat frontend
+  ############################
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:v0.9.5
+    container_name: open-webui
+    network_mode: host
+    environment:
+      - WEBUI_URL=${WEBUI_URL:-http://localhost:4096}
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
+      - WEBUI_AUTH=True
+      # DashScope / Qwen models via OpenAI-compatible API
+      - DASHSCOPE_BASE_URL=https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+      - QWEN_ENABLE_SEARCH=true
+      - QWEN_TEXT_MODEL=qwen-plus
+      - QWEN_VISION_MODEL=qwen3-vl-plus
+      - QWEN_IMAGE_MODEL=qwen-image-2.0
+      - QWEN_IMAGE_EDIT_MODEL=qwen-image-edit-plus
+      # Model defaults
+      - DEFAULT_MODELS=qwen_auto
+      - DEFAULT_PINNED_MODELS=qwen_auto
+      - ENABLE_BASE_MODELS_CACHE=True
+      # Web search — SearXNG (self-hosted)
+      - ENABLE_WEB_SEARCH=True
+      - WEB_SEARCH_ENGINE=searxng
+      - SEARXNG_API_URL=http://127.0.0.1:9090
+      - WEB_SEARCH_TRUST_ENV=true
+      # Proxy for outbound requests
+      - HTTP_PROXY=http://127.0.0.1:8118
+      - HTTPS_PROXY=http://127.0.0.1:8118
+      - ALL_PROXY=http://127.0.0.1:8118
+      - NO_PROXY=localhost,127.0.0.1,::1
+    volumes:
+      - gptproxy_open-webui:/app/backend/data
+    depends_on:
+      - searxng
+    restart: unless-stopped
+
+  ############################
+  # SearXNG — self-hosted meta-search engine
+  ############################
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng
+    network_mode: host
+    volumes:
+      - ./config/searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://127.0.0.1:9090
+      - GRANIAN_PORT=9090
+    restart: unless-stopped
+
+  ############################
+  # MCPO — stdio→HTTP MCP proxy for Playwright
+  ############################
+  mcpo:
+    image: ghcr.io/open-webui/mcpo:main
+    container_name: mcpo
+    network_mode: host
+    volumes:
+      - ./config/mcpo/config.json:/app/config.json:ro
+    command: ["--config", "/app/config.json", "--port", "9320"]
+    depends_on:
+      - open-webui
+    restart: unless-stopped
+
+  ############################
+  # Open Terminal — code execution sandbox
+  ############################
+  open-terminal:
+    image: ghcr.io/open-webui/open-terminal:slim
+    container_name: open-terminal
+    network_mode: host
+    environment:
+      - OPEN_TERMINAL_API_KEY=${OPEN_TERMINAL_API_KEY}
+    volumes:
+      - open-terminal-data:/home/user
+    restart: unless-stopped
+
+  ############################
+  # Zotero MCP — standalone MCP server for Zotero library
+  ############################
+  zotero-mcp:
+    image: python:3.11-slim
+    container_name: zotero-mcp
+    network_mode: host
+    environment:
+      - ZOTERO_LOCAL=true
+      - ZOTERO_MCP_TRANSPORT=streamable-http
+      - ZOTERO_MCP_PORT=23120
+    command: >
+      sh -c "pip install --quiet zotero-mcp-server &&
+      zotero-mcp serve --transport streamable-http --port 23120"
+    depends_on:
+      - zotero
+    restart: unless-stopped
+
+volumes:
+  gptproxy_open-webui:
+    external: true
+  open-terminal-data:
