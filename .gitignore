@@ -1,7 +1,18 @@
 # Secrets and runtime state
 .env
 config/
+.sync/
+sync.log
 __pycache__/
 .venv/
 pdfs/
 .discovery/
+
+# Open WebUI runtime (DB, uploads, caches) — keep code, ignore state
+openwebui/data/
+openwebui/.env
+
+# Optional appliances — local env only
+jupyter/.env
+opencode/.env
+opencode/.env.telegram

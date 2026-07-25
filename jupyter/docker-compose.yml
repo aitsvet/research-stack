@@ -1,0 +1,34 @@
+services:
+  jupyter:
+    build:
+      dockerfile: Dockerfile.jupyter
+    container_name: jupyter
+    # Host network, like the rest of the stack: the MCP bridge and front-ends
+    # reach it on 127.0.0.1 without port plumbing.
+    network_mode: host
+    environment:
+      - JUPYTER_TOKEN=${JUPYTER_TOKEN:?set in .env}
+    volumes:
+      - ${WORK_DIR:?set in .env}:/home/jovyan/work
+    command: >
+      start-notebook.sh
+      --IdentityProvider.token=${JUPYTER_TOKEN}
+      --ServerApp.allow_origin='*'
+      --ServerApp.ip='127.0.0.1'
+    restart: unless-stopped
+
+  jupyter-mcp:
+    image: python:3.11-slim
+    container_name: jupyter-mcp
+    network_mode: host
+    depends_on:
+      - jupyter
+    environment:
+      - JUPYTER_TOKEN=${JUPYTER_TOKEN}
+    command: >
+      sh -c "pip install --quiet jupyter-mcp-server==0.14.0 &&
+      jupyter-mcp-server start
+      --transport streamable-http --port 4040
+      --document-url http://127.0.0.1:8888 --document-token $$JUPYTER_TOKEN
+      --runtime-url  http://127.0.0.1:8888 --runtime-token  $$JUPYTER_TOKEN"
+    restart: unless-stopped

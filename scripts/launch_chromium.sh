@@ -22,8 +22,14 @@ docker exec "$CONTAINER" bash -c "pkill -f 'user-data-dir=$DATA_DIR' || true; sl
 # normal resizable window.
 docker exec -u 1000 -d "$CONTAINER" bash -c "
   export XDG_RUNTIME_DIR=/config/.XDG
-  export WAYLAND_DISPLAY=wayland-1
-  export DISPLAY=:0
+  export WAYLAND_DISPLAY=\$(ls /config/.XDG/wayland-* 2>/dev/null | grep -v lock | head -1 | xargs -r basename)
+  [ -z \"\$WAYLAND_DISPLAY\" ] && export WAYLAND_DISPLAY=wayland-1
+  # X display drifts across container restarts (:0 vs :1) — detect the live one
+  # from the running Xwayland, fall back to the newest socket, then :0.
+  DISP=\$(pgrep -a Xwayland 2>/dev/null | grep -oE ' :[0-9]+' | head -1 | tr -d ' ')
+  [ -z \"\$DISP\" ] && DISP=\$(ls /tmp/.X11-unix 2>/dev/null | tail -1 | sed 's/^X/:/')
+  [ -z \"\$DISP\" ] && DISP=:0
+  export DISPLAY=\$DISP
   exec /usr/bin/chromium-real \
     --ozone-platform=x11 \
     --no-first-run \

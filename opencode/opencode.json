@@ -1,0 +1,47 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "lsp": {
+    "python": {
+      "command": ["pyright-langserver", "--stdio"],
+      "enabled": true,
+      "root": "/workspace",
+      "extensions": ["py", "pyi", "pyx", "pxd"]
+    }
+  },
+  "mcp": {
+    "jupyter": {
+      "enabled": true,
+      "type": "remote",
+      "url": "http://127.0.0.1:4040/mcp"
+    },
+    "chrome": {
+      "enabled": true,
+      "type": "local",
+      "command": ["npx", "-y", "@iflow-mcp/chrome-tools"],
+      "env": {
+        "CHROME_DEBUG_URL": "http://localhost:9222",
+        "CHROME_CONNECTION_TYPE": "local"
+      }
+    }
+  },
+  "provider": {
+    "ollama": {
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "http://localhost:11434/v1"
+      },
+      "models": {
+        "qwen3.5:9b": {
+          "tools": true
+        },
+        "gpt-oss:20b": {
+          "tools": true
+        },
+        "gemma3:27b": {
+          "tools": true
+        }
+      }
+    }
+  },
+  "model": "opencode/minimax-m2.5-free"
+}
