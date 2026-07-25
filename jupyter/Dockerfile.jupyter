@@ -1,0 +1,5 @@
+FROM jupyter/scipy-notebook:latest
+
+RUN pip3 install --break-system-packages jupyterlab==4.4.1 jupyter-collaboration==4.0.2 jupyter-mcp-tools>=0.1.4 ipykernel
+RUN pip3 uninstall --break-system-packages -y pycrdt datalayer_pycrdt
+RUN pip3 install --break-system-packages datalayer_pycrdt==0.12.17

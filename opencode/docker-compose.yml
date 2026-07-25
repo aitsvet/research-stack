@@ -1,0 +1,27 @@
+services:
+  opencode:
+    build:
+      dockerfile: Dockerfile.opencode
+    container_name: opencode
+    network_mode: host
+    environment:
+      - OPENCODE_CONFIG=/work/opencode.json
+      - JUPYTER_TOKEN=${JUPYTER_TOKEN:-}
+    volumes:
+      - ${WORK_DIR:?set in .env}:/work
+      - ./opencode.json:/work/opencode.json:ro
+    command: ["web", "--hostname", "127.0.0.1"]
+    restart: unless-stopped
+
+  # Telegram bridge for the same OpenCode instance; opt-in:
+  #   docker compose --profile telegram up -d
+  telegram:
+    image: node:20-alpine
+    container_name: opencode-telegram
+    network_mode: host
+    profiles: [telegram]
+    volumes:
+      - ./.env.telegram:/root/.config/opencode-telegram-bot/.env
+    command: >
+      sh -c "npx @grinev/opencode-telegram-bot@latest"
+    restart: unless-stopped

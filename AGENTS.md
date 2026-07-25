@@ -16,6 +16,11 @@ claude mcp add zotero http://127.0.0.1:23120/mcp -t http \
   --header "Authorization: Bearer $ZOTERO_MCP_TOKEN"
 ```
 
+Library sync between peers (one **origin** merges, any number of replicas;
+independent of which AI front-end runs where): `scripts/sync_library.sh` on
+the origin — design and operations in `SETUP.md`. A replica's zotero container
+stops briefly during its sync window.
+
 ## Available MCPs
 
 - **`zotero`** — search/read library, add by identifier, annotations, collections, semantic search. All write scopes on.
@@ -115,6 +120,9 @@ Once `extract_texts.py` has produced the per-item `.txt`, drive synthesis off th
 ## Acquiring bot-walled OA sources (browser playbook)
 
 `acquire.py` / `retry_unpaywall.py` fetch server-side and fail on anti-bot/JS walls; their "OK/attached" is unreliable (a stored `.zotero-ft-cache` can be a cached interstitial, not the paper). Recovery ladder, cheapest first:
+
+- **Chromium-first rule (applies to ANY gated fetch, not just papers).** curl/WebFetch are for trivially open URLs only. The moment a JS challenge (DDoS-Guard, Cloudflare, «проверка браузера»), download button, or SPA appears — don't mirror-hop with curl, go straight to the container Chromium: `launch_chromium.sh` (auto-detects the container's live X display; rerun after every container restart) → drive via playwright/chrome-devtools MCP or `cdp_eval.py`. `cdp_eval.py` needs the repo venv — if `.venv` is missing: `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`. Web *discovery* stays on WebSearch (find candidate URLs); Chromium *fetches* them.
+- **File downloads through CDP:** nav to the site's landing page once (challenge cookie sets), then click the download link *in-page* (`cdp_eval.py eval '...find("a[href*=get]").click()...'` — direct nav to the API URL loses the referer and bounces). The file lands in `/config/Downloads/` → `docker cp zotero:/config/Downloads/<f> <dest>`.
 
 - **Locate a real OA copy first.** Unpaywall `best_oa_location`; Europe PMC (`/webservices/rest/search?query=DOI:"<doi>"`) or NCBI idconv for a PMCID. Prefer a repository / **PMC HTML full-text page** over a publisher `.pdf` URL.
 - **`fetch_pdf.sh <html-url> <dir> <base>`** renders via a *fresh, cookieless* container Chromium: beats UA-only blocks (PMC, institutional repos, MDPI, bronze-OA publisher pages) but **not** Cloudflare/interactive walls, and it **cannot render a direct `.pdf` URL in headless** — always aim it at the HTML article page (PMC most reliable).

@@ -40,8 +40,11 @@ Container uses **`network_mode: host`** — every port the container opens is di
 | `SETUP.md` | yes | This document |
 | `scripts/launch_chromium.sh` | yes | Idempotent launcher for the in-container Chromium with CDP |
 | `scripts/apply_config.sh` | yes | Copies Zotero `user.js` into the active profile |
+| `scripts/sync_library.sh` | yes | Two-way library sync between peers — run on the origin (section below) |
+| `scripts/snapshot_db.sh` / `place_snapshot.sh` / `merge_replica.py` | yes | Sync building blocks: crash-consistent DB snapshot, DB swap on the replica, MCP merge-replay |
 | `scripts/` (the rest) | yes | Research discovery/acquisition/extraction pipeline — catalogued in `AGENTS.md` |
 | `requirements.txt` | yes | Python deps for the pipeline scripts (`.venv/bin/pip install -r`) |
+| `openwebui/` / `opencode/` / `jupyter/` | yes | Optional appliances: AI front-ends (Open WebUI, OpenCode) and JupyterLab+MCP — each with its own compose + README |
 | `user.js` | yes | Zotero MCP plugin prefs — `requireAuth=true`, all write scopes on |
 | `.env` | **no** | Real secrets: web-UI password, Zotero MCP token |
 | `config/` | **no** | Zotero profile, library, attachments, installed `.xpi` plugins |
@@ -161,6 +164,55 @@ Set `ZOTERO_MCP_TOKEN` in your shell before launching codex.
 | Tail Zotero logs | `docker logs -f zotero` |
 | Tail Chromium logs | `docker exec zotero tail -f /tmp/chromium.log` |
 | Web UI tunnel | `ssh -L 8888:localhost:8888 <vm>` |
+
+## Library sync between peers
+
+Any number of hosts can run this stack, each with its own AI front-end
+(Claude Code, OpenCode, Open WebUI, …) — the sync neither knows nor cares
+which. Like git with a hub: one host is the **origin** (the merge point),
+every other is a **replica**; peers exchange the Zotero library itself over
+ssh+rsync, no zotero.org account involved.
+
+All peers write. rsync cannot merge two sqlite files, so merging happens on
+the origin through its live Zotero. `scripts/sync_library.sh` (run ON the
+origin, once per replica) does the whole cycle:
+
+1. stops zotero on the replica (its writes pause safely; the replica's MCP is
+   down for the duration) and fetches its DB; if the origin has no DB yet, it
+   transfers the replica's library wholesale and stops there (first fill);
+2. takes a crash-consistent snapshot of its own DB — `snapshot_db.sh`,
+   sub-second `docker pause` (why not the sqlite backup API — see its header);
+3. `merge_replica.py` diffs and replays the replica's edits into the origin's
+   live Zotero via MCP; what is replayed and who wins conflicts — see its
+   header; an empty diff skips the merge;
+4. pushes the merged snapshot back with `rsync -a --delete` (storage, styles,
+   translators + the `config/.zotero/` profile carrying the MCP plugin);
+   `place_snapshot.sh` on the replica swaps the DB, checks integrity and item
+   count, and the replica's container starts again — or is left stopped if
+   the check fails.
+
+Losing note versions and unsupported attachments are rescued into
+`.sync/rescue-notes/` and `.sync/rescue-storage/` on the origin. Replica
+rollback: `cp config/Zotero/zotero.sqlite.prev config/Zotero/zotero.sqlite`.
+
+```bash
+SYNC_REPLICA=user@peer ./scripts/sync_library.sh --dry-run   # plan + volumes
+SYNC_REPLICA=user@peer ./scripts/sync_library.sh
+```
+
+Access is the ordinary ssh key the origin already uses to reach the peer
+(override with `SYNC_SSH_KEY`). Several replicas — one run per peer;
+overlapping runs are serialized by flock. Cron on the origin, one line per
+peer (daily at 04:17; the replica's zotero is down during its window):
+
+```
+17 4 * * * SYNC_REPLICA=user@peer $HOME/zotero-setup/scripts/sync_library.sh >>$HOME/zotero-setup/sync.log 2>&1
+```
+
+The first fill transfers the whole storage; later runs are deltas. Bring a
+new peer's zotero container up only AFTER its first fill — a freshly created
+empty DB against a full peer aborts the merge (the script explains what to
+remove).
 
 ## What each MCP is good for
 
