@@ -43,7 +43,7 @@ services:
       # Web search — SearXNG (self-hosted)
       - ENABLE_WEB_SEARCH=True
       - WEB_SEARCH_ENGINE=searxng
-      - SEARXNG_API_URL=http://127.0.0.1:9090
+      - SEARXNG_QUERY_URL=http://127.0.0.1:9090/search?q={query}&format=json&language=auto
       - WEB_SEARCH_TRUST_ENV=true
       # Proxy for outbound requests
       - HTTP_PROXY=http://127.0.0.1:8118
