@@ -77,7 +77,7 @@ def main():
         for L in locs:
             url = L.get("url_for_pdf") or L.get("url")
             if not url: continue
-            host = L.get("host_type","")
+            host = L.get("host_type") or "?"
             ct = "application/pdf" if (url.endswith(".pdf") or "/pdf" in url) else None
             args = {"url": url, "parentItemKey": key, "ifExists": "skip"}
             if ct: args["contentType"] = ct
