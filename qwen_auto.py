@@ -1,7 +1,7 @@
 """
 title: Qwen Auto
 author: local
-version: 0.4.0
+version: 0.5.1
 description: Один чат — четыре модели. Текст идёт в qwen3-max, картинка на входе в
     qwen3-vl, а рисование и правку картинок модель вызывает сама как инструменты
     (qwen-image / qwen-image-edit через нативный DashScope API).
@@ -23,7 +23,7 @@ log = logging.getLogger(__name__)
 
 NATIVE_PATH = "/api/v1/services/aigc/multimodal-generation/generation"
 
-MAX_TOOL_ROUNDS = 8
+MAX_TOOL_ROUNDS = 16
 
 
 class Pipe:
@@ -155,19 +155,31 @@ class Pipe:
             "function": {
                 "name": "search_web",
                 "description": (
-                    "Поиск в интернете. ОБЯЗАТЕЛЬНО вызывать при любых вопросах "
-                    "о реальных событиях, расписаниях, адресах, ценах, контактах, "
-                    "новостях. Не придумывать факты — сначала искать."
+                    "Поиск в интернете (несколько запросов за один вызов). "
+                    "ОБЯЗАТЕЛЬНО вызывать при любых вопросах о реальных событиях, "
+                    "расписаниях, адресах, ценах, контактах, новостях. "
+                    "Не придумывать факты — сначала искать."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "Поисковый запрос на языке пользователя.",
+                        "queries": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "minItems": 2,
+                            "maxItems": 4,
+                            "description": (
+                                "2–4 РАЗНЫХ запроса: разные языки и формулировки. "
+                                "Минимум один запрос обязан быть СМЕШАННЫМ: точное "
+                                "название/аббревиатура из вопроса ДОСЛОВНО (не "
+                                "переводить и не транслитерировать), а город и "
+                                "остальные слова — на языке региона (для России "
+                                "кириллицей). Пример формы: «<Название как в "
+                                "вопросе> <город по-местному> <тема по-местному>»."
+                            ),
                         }
                     },
-                    "required": ["query"],
+                    "required": ["queries"],
                 },
             },
         },
@@ -197,6 +209,45 @@ class Pipe:
     SEARXNG_URL = os.getenv(
         "SEARXNG_QUERY_URL", "http://127.0.0.1:9090/search"
     )
+
+    UA = (
+        "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) "
+        "Gecko/20100101 Firefox/140.0"
+    )
+
+    @staticmethod
+    def _html_to_text(html_src: str, base_url: str = "") -> str:
+        import html as html_mod
+        from urllib.parse import urljoin
+
+        text = re.sub(
+            r"(?is)<(script|style|noscript|svg|head|template)[^>]*>.*?</\1>",
+            " ", html_src,
+        )
+        text = re.sub(r"(?is)<!--.*?-->", " ", text)
+
+        def _link(m: "re.Match") -> str:
+            href, inner = m.group(1), m.group(2)
+            label = re.sub(r"<[^>]+>", " ", inner)
+            label = re.sub(r"\s+", " ", label).strip()
+            if not label or href.startswith(("javascript:", "mailto:", "#")):
+                return label
+            return f"{label} [{urljoin(base_url, href)}]"
+
+        text = re.sub(
+            r'(?is)<a\s[^>]*href="([^"]+)"[^>]*>(.*?)</a>', _link, text
+        )
+        text = re.sub(r"(?i)<br\s*/?>", "\n", text)
+        text = re.sub(
+            r"(?i)</(p|div|li|tr|h[1-6]|table|section|article|ul|ol|dd|dt)>",
+            "\n", text,
+        )
+        text = re.sub(r"(?i)<t[dh][^>]*>", " | ", text)
+        text = re.sub(r"<[^>]+>", " ", text)
+        text = html_mod.unescape(text)
+        text = re.sub(r"[ \t\r\f\v]+", " ", text)
+        text = re.sub(r"\n\s*\n+", "\n", text)
+        return text.strip()
 
     def _headers(self) -> dict:
         return {
@@ -312,6 +363,16 @@ class Pipe:
                 url = stored
         return f"\n\n![{model}]({url})\n"
 
+    async def _searx(self, client: httpx.AsyncClient, query: str) -> list:
+        params = {"q": query, "format": "json", "language": "auto"}
+        r = await client.get(self.SEARXNG_URL, params=params, timeout=15)
+        items = r.json().get("results", [])
+        if not items:
+            params["engines"] = "bing"
+            r = await client.get(self.SEARXNG_URL, params=params, timeout=15)
+            items = r.json().get("results", [])
+        return items
+
     @staticmethod
     def _collect_tool_calls(delta: dict, calls: dict) -> None:
         for tc in delta.get("tool_calls") or []:
@@ -332,6 +393,7 @@ class Pipe:
         __user__: Optional[dict] = None,
         __event_emitter__: Optional[Callable[[dict], Awaitable[None]]] = None,
         __tools__: Optional[dict] = None,
+        __task__: Optional[str] = None,
     ) -> Any:
         if not self.valves.DASHSCOPE_API_KEY:
             yield "Не задан DASHSCOPE_API_KEY в Valves этой функции."
@@ -339,6 +401,26 @@ class Pipe:
 
         user_id = (__user__ or {}).get("id")
         messages = body.get("messages", [])
+
+        # Служебные вызовы OWUI (заголовок чата, теги, follow-up) — обычное
+        # одноразовое дополнение без инструментов и без веб-поиска.
+        if __task__:
+            self._dbg("task-вызов:", __task__, "— без инструментов")
+            async with httpx.AsyncClient(timeout=self.valves.TIMEOUT) as client:
+                resp = await client.post(
+                    self.valves.COMPAT_BASE_URL.rstrip("/") + "/chat/completions",
+                    headers=self._headers(),
+                    json={
+                        "model": self.valves.TEXT_MODEL,
+                        "messages": messages,
+                        "stream": False,
+                    },
+                )
+                if resp.status_code == 200:
+                    yield resp.json()["choices"][0]["message"]["content"] or ""
+                else:
+                    yield ""
+            return
 
         self._dbg("=== вход ===")
         self._dbg("ключи body:", sorted(body.keys()))
@@ -379,14 +461,41 @@ class Pipe:
         )
 
         SYSTEM_PROMPT = (
-            "ВАЖНО: При любых вопросах о реальных событиях, расписаниях, адресах, "
-            "ценах, контактах или другой текущей информации — ВСЕГДА вызывай search_web "
-            "перед тем как отвечать. Не придумывай факты. Если search_web не дал "
-            "результатов — попробуй другой запрос или скажи что не нашёл. "
-            "Используй tool_browser_navigate_post и tool_browser_snapshot_post "
-            "для скрапинга конкретных страниц, когда search_web дал ссылку. "
-            "Генерируй изображения ТОЛЬКО когда пользователь прямо просит "
-            "нарисовать/сгенерировать картинку."
+            "Ты — универсальный ассистент с инструментами: веб-поиск, загрузка "
+            "страниц, браузер, терминал, генерация/правка изображений.\n"
+            "1. Вопросы о реальном мире (факты, цены, расписания, адреса, "
+            "наличие, контакты, новости) — сначала search_web с 2–4 разными "
+            "запросами (разные языки и формулировки). Не отвечай из памяти и "
+            "не выдумывай.\n"
+            "2. Точные названия, аббревиатуры и имена из вопроса пиши в "
+            "запросах ДОСЛОВНО, без перевода и транслитерации; остальные слова "
+            "запроса — на языке региона темы (смешанный алфавит — норма). "
+            "Похожее название или другая аббревиатура — ДРУГАЯ сущность: в "
+            "источнике название должно буквально совпадать со спрошенным, "
+            "иначе ищи дальше или прямо скажи, что нашёл только похожее.\n"
+            "3. Сниппеты поиска — наводка, не ответ: открой 1–3 лучшие ссылки "
+            "через fetch_url. Ссылки в тексте страниц даны в [квадратных "
+            "скобках] — по ним можно переходить дальше.\n"
+            "4. Просят полный список/расписание/подборку — найди "
+            "страницу-каталог, перечисли её пункты и открой каждый релевантный; "
+            "однотипные страницы запрашивай параллельно (несколько fetch_url в "
+            "одном раунде); перед ответом проверь, что охватил всё.\n"
+            "5. Просят ссылки на товары/страницы — давай только URL, которые "
+            "реально видел в результатах поиска или на страницах; ссылки не "
+            "сочиняй никогда.\n"
+            "6. Оценки стоимости/бюджета — собери цифры из нескольких "
+            "источников, дай разбивку по статьям и итоговый диапазон.\n"
+            "7. Если fetch_url вернул мало текста или ошибку (JS-сайт, "
+            "защита) — используй браузерные инструменты (navigate + snapshot) "
+            "или терминал (python/curl), если они доступны.\n"
+            "8. Вопросы-инструкции (как сделать X, напиши код) — отвечай по "
+            "существу шагами и кодом; веб подключай для актуальных деталей "
+            "(цены, версии, ссылки).\n"
+            "9. Отвечай на языке пользователя, структурировано; в конце — URL "
+            "источников. Чего нет в источниках — того нет в ответе; не нашёл — "
+            "так и скажи.\n"
+            "10. Изображения генерируй/правь ТОЛЬКО по прямой просьбе "
+            "(generate_image / edit_image)."
         )
 
         async with httpx.AsyncClient(timeout=self.valves.TIMEOUT) as client:
@@ -395,6 +504,10 @@ class Pipe:
             working_messages = list(messages)
             if not working_messages or working_messages[0].get("role") != "system":
                 working_messages.insert(0, {"role": "system", "content": SYSTEM_PROMPT})
+            else:
+                first = dict(working_messages[0])
+                first["content"] = SYSTEM_PROMPT + "\n\n" + (first.get("content") or "")
+                working_messages[0] = first
             tool_results_log = []
             image_mds = []
 
@@ -403,10 +516,9 @@ class Pipe:
                     "model": router,
                     "messages": working_messages,
                     "tools": all_tools,
+                    "parallel_tool_calls": True,
                     "stream": True,
                 }
-                if self.valves.ENABLE_SEARCH and router == self.valves.TEXT_MODEL and round_idx == 0:
-                    pass
                 for key in ("temperature", "top_p", "max_tokens"):
                     if body.get(key) is not None:
                         payload[key] = body[key]
@@ -481,9 +593,14 @@ class Pipe:
                                 client, self.valves.IMAGE_MODEL,
                                 [{"text": args.get("prompt", "")}], user_id,
                             )
-                            if result and "![ " in result:
+                            if result and "![" in result:
                                 image_mds.append(result)
                                 yield result
+                                result = (
+                                    "Изображение сгенерировано и уже показано "
+                                    "пользователю. Ссылку повторно НЕ вставляй — "
+                                    "просто кратко прокомментируй результат."
+                                )
                         elif slot["name"] == "edit_image":
                             source = self._last_image(messages)
                             if source:
@@ -500,36 +617,46 @@ class Pipe:
                                 if result and "![" in result:
                                     image_mds.append(result)
                                     yield result
+                                    result = (
+                                        "Изображение отредактировано и уже "
+                                        "показано пользователю. Ссылку повторно "
+                                        "НЕ вставляй — просто кратко "
+                                        "прокомментируй результат."
+                                    )
 
                         elif slot["name"] == "search_web":
-                            query = args.get("query", "")
-                            self._dbg("search_web:", query[:80])
-                            await status(f"Ищу: {query[:60]}")
+                            queries = args.get("queries") or []
+                            if isinstance(queries, str):
+                                queries = [queries]
+                            if args.get("query"):
+                                queries.append(args["query"])
+                            queries = [
+                                q.strip() for q in queries
+                                if isinstance(q, str) and q.strip()
+                            ][:4]
+                            self._dbg("search_web:", " | ".join(queries)[:200])
+                            await status(f"Ищу: {'; '.join(queries)[:60]}")
                             try:
-                                params = {"q": query, "format": "json", "language": "auto"}
-                                r = await client.get(
-                                    self.SEARXNG_URL, params=params, timeout=15,
-                                )
-                                data = r.json()
-                                items = data.get("results", [])[:8]
-                                if not items:
-                                    params["engines"] = "bing"
-                                    r = await client.get(
-                                        self.SEARXNG_URL, params=params, timeout=15,
-                                    )
-                                    data = r.json()
-                                    items = data.get("results", [])[:8]
-                                if items:
+                                seen: set = set()
+                                blocks = []
+                                for q in queries:
+                                    items = await self._searx(client, q)
                                     lines = []
-                                    for it in items:
-                                        title = it.get("title", "")
+                                    for it in items[:8]:
                                         url = it.get("url", "")
+                                        if not url or url in seen:
+                                            continue
+                                        seen.add(url)
+                                        title = it.get("title", "")
                                         snippet = it.get("content", "")[:200]
                                         lines.append(f"- **{title}**\n  {url}\n  {snippet}")
-                                    result = "\n\n".join(lines)
-                                else:
-                                    unresponsive = data.get("unresponsive_engines", [])
-                                    result = f"Ничего не найдено. Проблемные движки: {unresponsive}"
+                                    blocks.append(
+                                        f"### {q}\n" + ("\n\n".join(lines) or "(ничего нового)")
+                                    )
+                                result = "\n\n".join(blocks) if seen else (
+                                    "Ничего не найдено ни по одному запросу — "
+                                    "попробуй другие формулировки или языки."
+                                )
                             except Exception as e:
                                 result = f"Ошибка поиска: {e}"
 
@@ -538,11 +665,21 @@ class Pipe:
                             self._dbg("fetch_url:", url[:100])
                             await status(f"Загружаю: {url[:60]}")
                             try:
-                                r = await client.get(url, timeout=20, follow_redirects=True)
+                                r = await client.get(
+                                    url, timeout=25, follow_redirects=True,
+                                    headers={"User-Agent": self.UA},
+                                )
+                                ctype = r.headers.get("content-type", "")
                                 text = r.text
+                                if "html" in ctype or text.lstrip()[:1] == "<":
+                                    text = self._html_to_text(text, str(r.url))
                                 if len(text) > 12000:
                                     text = text[:12000] + "\n\n[...обрезано...]"
-                                result = text
+                                result = (
+                                    f"[{r.status_code}] {str(r.url)}\n\n{text}"
+                                    if text.strip()
+                                    else f"[{r.status_code}] {str(r.url)} — пустая страница"
+                                )
                             except Exception as e:
                                 result = f"Ошибка загрузки: {e}"
 
@@ -575,6 +712,43 @@ class Pipe:
                         "tool_call_id": tc_id,
                         "content": result[:8000] if isinstance(result, str) else str(result)[:8000],
                     })
+
+            else:
+                # Раунды исчерпаны, а модель всё ещё просит инструменты —
+                # финальный ответ без tools по уже собранным данным.
+                self._dbg("лимит раундов исчерпан — финальный ответ без tools")
+                await status("Собираю финальный ответ…")
+                working_messages.append({
+                    "role": "user",
+                    "content": (
+                        "Лимит вызовов инструментов исчерпан. Дай финальный "
+                        "ответ по уже собранным данным, честно отметив, "
+                        "чего не хватило."
+                    ),
+                })
+                final_payload = {
+                    "model": router,
+                    "messages": working_messages,
+                    "stream": True,
+                }
+                async with client.stream(
+                    "POST",
+                    self.valves.COMPAT_BASE_URL.rstrip("/") + "/chat/completions",
+                    headers=self._headers(), json=final_payload,
+                ) as resp:
+                    if resp.status_code == 200:
+                        async for line in resp.aiter_lines():
+                            if not line.startswith("data:"):
+                                continue
+                            chunk = line[5:].strip()
+                            if not chunk or chunk == "[DONE]":
+                                continue
+                            try:
+                                delta = json.loads(chunk)["choices"][0]["delta"]
+                            except (json.JSONDecodeError, KeyError, IndexError):
+                                continue
+                            if delta.get("content"):
+                                yield delta["content"]
 
             if tool_results_log:
                 self._dbg(f"инструменты выполнены: {len(tool_results_log)} раундов")

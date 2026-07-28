@@ -26,10 +26,12 @@ services:
     container_name: open-webui
     network_mode: host
     environment:
+      - PORT=${OWUI_PORT:-4096}
       - WEBUI_URL=${WEBUI_URL:-http://localhost:4096}
       - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
       - WEBUI_AUTH=True
       # DashScope / Qwen models via OpenAI-compatible API
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
       - DASHSCOPE_BASE_URL=https://dashscope-intl.aliyuncs.com/compatible-mode/v1
       - QWEN_ENABLE_SEARCH=true
       - QWEN_TEXT_MODEL=qwen3-max
@@ -45,10 +47,11 @@ services:
       - WEB_SEARCH_ENGINE=searxng
       - SEARXNG_QUERY_URL=http://127.0.0.1:9090/search
       - WEB_SEARCH_TRUST_ENV=true
-      # Proxy for outbound requests
-      - HTTP_PROXY=http://127.0.0.1:8118
-      - HTTPS_PROXY=http://127.0.0.1:8118
-      - ALL_PROXY=http://127.0.0.1:8118
+      # Proxy for outbound requests — set OUTBOUND_PROXY in .env only on hosts
+      # that need to tunnel out (e.g. http://127.0.0.1:8118); empty = direct
+      - HTTP_PROXY=${OUTBOUND_PROXY:-}
+      - HTTPS_PROXY=${OUTBOUND_PROXY:-}
+      - ALL_PROXY=${OUTBOUND_PROXY:-}
       - NO_PROXY=localhost,127.0.0.1,::1
     volumes:
       - gptproxy_open-webui:/app/backend/data
@@ -103,6 +106,9 @@ services:
   zotero-mcp:
     image: python:3.11-slim
     container_name: zotero-mcp
+    # The in-Zotero MCP plugin already serves 127.0.0.1:23120; this standalone
+    # server clashes with it. Opt in with: docker compose --profile extra up
+    profiles: ["extra"]
     network_mode: host
     environment:
       - ZOTERO_LOCAL=true
