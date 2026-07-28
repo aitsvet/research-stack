@@ -32,7 +32,7 @@ services:
       # DashScope / Qwen models via OpenAI-compatible API
       - DASHSCOPE_BASE_URL=https://dashscope-intl.aliyuncs.com/compatible-mode/v1
       - QWEN_ENABLE_SEARCH=true
-      - QWEN_TEXT_MODEL=qwen-plus
+      - QWEN_TEXT_MODEL=qwen3-max
       - QWEN_VISION_MODEL=qwen3-vl-plus
       - QWEN_IMAGE_MODEL=qwen-image-2.0
       - QWEN_IMAGE_EDIT_MODEL=qwen-image-edit-plus
@@ -43,7 +43,7 @@ services:
       # Web search — SearXNG (self-hosted)
       - ENABLE_WEB_SEARCH=True
       - WEB_SEARCH_ENGINE=searxng
-      - SEARXNG_QUERY_URL=http://127.0.0.1:9090/search?q={query}&format=json&language=auto
+      - SEARXNG_QUERY_URL=http://127.0.0.1:9090/search
       - WEB_SEARCH_TRUST_ENV=true
       # Proxy for outbound requests
       - HTTP_PROXY=http://127.0.0.1:8118
