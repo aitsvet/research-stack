@@ -150,7 +150,53 @@ class Pipe:
                 },
             },
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "search_web",
+                "description": (
+                    "Поиск в интернете. ОБЯЗАТЕЛЬНО вызывать при любых вопросах "
+                    "о реальных событиях, расписаниях, адресах, ценах, контактах, "
+                    "новостях. Не придумывать факты — сначала искать."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Поисковый запрос на языке пользователя.",
+                        }
+                    },
+                    "required": ["query"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "fetch_url",
+                "description": (
+                    "Загрузить и вернуть текст веб-страницы по URL. "
+                    "Использовать когда search_web дал ссылку и нужен "
+                    "конкретный контент со страницы."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "URL страницы.",
+                        }
+                    },
+                    "required": ["url"],
+                },
+            },
+        },
     ]
+
+    SEARXNG_URL = os.getenv(
+        "SEARXNG_QUERY_URL", "http://127.0.0.1:9090/search"
+    )
 
     def _headers(self) -> dict:
         return {
@@ -332,11 +378,25 @@ class Pipe:
             f"({len(self.TOOLS)} own + {len(all_tools) - len(self.TOOLS)} external)"
         )
 
+        SYSTEM_PROMPT = (
+            "ВАЖНО: При любых вопросах о реальных событиях, расписаниях, адресах, "
+            "ценах, контактах или другой текущей информации — ВСЕГДА вызывай search_web "
+            "перед тем как отвечать. Не придумывай факты. Если search_web не дал "
+            "результатов — попробуй другой запрос или скажи что не нашёл. "
+            "Используй tool_browser_navigate_post и tool_browser_snapshot_post "
+            "для скрапинга конкретных страниц, когда search_web дал ссылку. "
+            "Генерируй изображения ТОЛЬКО когда пользователь прямо просит "
+            "нарисовать/сгенерировать картинку."
+        )
+
         async with httpx.AsyncClient(timeout=self.valves.TIMEOUT) as client:
             await status(f"Маршрут: {router}")
 
             working_messages = list(messages)
+            if not working_messages or working_messages[0].get("role") != "system":
+                working_messages.insert(0, {"role": "system", "content": SYSTEM_PROMPT})
             tool_results_log = []
+            image_mds = []
 
             for round_idx in range(MAX_TOOL_ROUNDS):
                 payload = {
@@ -346,7 +406,7 @@ class Pipe:
                     "stream": True,
                 }
                 if self.valves.ENABLE_SEARCH and router == self.valves.TEXT_MODEL and round_idx == 0:
-                    payload["enable_search"] = True
+                    pass
                 for key in ("temperature", "top_p", "max_tokens"):
                     if body.get(key) is not None:
                         payload[key] = body[key]
@@ -388,7 +448,7 @@ class Pipe:
                     break
 
                 call_names = [s["name"] for s in calls.values()]
-                self._dbg(f"round {round_idx}: {len(calls)} calls: {call_names}")
+                self._dbg(f"round {round_idx}: {len(calls)} calls:", {k: {"name": v["name"], "args": v.get("arguments","")[:300]} for k,v in calls.items()})
                 await status(f"Инструменты: {', '.join(call_names)} (раунд {round_idx + 1})")
 
                 assistant_msg = {
@@ -421,6 +481,9 @@ class Pipe:
                                 client, self.valves.IMAGE_MODEL,
                                 [{"text": args.get("prompt", "")}], user_id,
                             )
+                            if result and "![ " in result:
+                                image_mds.append(result)
+                                yield result
                         elif slot["name"] == "edit_image":
                             source = self._last_image(messages)
                             if source:
@@ -434,13 +497,61 @@ class Pipe:
                                     [{"image": source}, {"text": args.get("instruction", "")}],
                                     user_id,
                                 )
+                                if result and "![" in result:
+                                    image_mds.append(result)
+                                    yield result
+
+                        elif slot["name"] == "search_web":
+                            query = args.get("query", "")
+                            self._dbg("search_web:", query[:80])
+                            await status(f"Ищу: {query[:60]}")
+                            try:
+                                params = {"q": query, "format": "json", "language": "auto"}
+                                r = await client.get(
+                                    self.SEARXNG_URL, params=params, timeout=15,
+                                )
+                                data = r.json()
+                                items = data.get("results", [])[:8]
+                                if not items:
+                                    params["engines"] = "bing"
+                                    r = await client.get(
+                                        self.SEARXNG_URL, params=params, timeout=15,
+                                    )
+                                    data = r.json()
+                                    items = data.get("results", [])[:8]
+                                if items:
+                                    lines = []
+                                    for it in items:
+                                        title = it.get("title", "")
+                                        url = it.get("url", "")
+                                        snippet = it.get("content", "")[:200]
+                                        lines.append(f"- **{title}**\n  {url}\n  {snippet}")
+                                    result = "\n\n".join(lines)
+                                else:
+                                    unresponsive = data.get("unresponsive_engines", [])
+                                    result = f"Ничего не найдено. Проблемные движки: {unresponsive}"
+                            except Exception as e:
+                                result = f"Ошибка поиска: {e}"
+
+                        elif slot["name"] == "fetch_url":
+                            url = args.get("url", "")
+                            self._dbg("fetch_url:", url[:100])
+                            await status(f"Загружаю: {url[:60]}")
+                            try:
+                                r = await client.get(url, timeout=20, follow_redirects=True)
+                                text = r.text
+                                if len(text) > 12000:
+                                    text = text[:12000] + "\n\n[...обрезано...]"
+                                result = text
+                            except Exception as e:
+                                result = f"Ошибка загрузки: {e}"
 
                     elif __tools__ and slot["name"] in __tools__:
                         try:
                             args = json.loads(slot["arguments"] or "{}")
                         except json.JSONDecodeError:
                             args = {}
-                        self._dbg(f"external: {slot['name']}({list(args.keys())})")
+                        self._dbg(f"external: {slot['name']}(" + str({k: str(v)[:120] for k,v in args.items()}) + ")")
                         try:
                             raw_result = await __tools__[slot["name"]]["callable"](**args)
                             if isinstance(raw_result, str):
@@ -457,6 +568,7 @@ class Pipe:
                         result = f"Инструмент '{slot['name']}' не найден."
 
                     tool_results_log.append(f"[{slot['name']}]: {str(result)[:200]}")
+                    self._dbg(f"result [{slot['name']}]: {str(result)[:400]}")
                     tc_id = slot.get("tool_call_id") or f"call_{round_idx}_{slot['name']}"
                     working_messages.append({
                         "role": "tool",
@@ -468,3 +580,6 @@ class Pipe:
                 self._dbg(f"инструменты выполнены: {len(tool_results_log)} раундов")
             self._dbg("=== конец ===")
             await status("", done=True)
+
+
+
