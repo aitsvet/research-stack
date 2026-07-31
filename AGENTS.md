@@ -19,7 +19,9 @@ claude mcp add zotero http://127.0.0.1:23120/mcp -t http \
 Library sync between peers (one **origin** merges, any number of replicas;
 independent of which AI front-end runs where): `scripts/sync_library.sh` on
 the origin — design and operations in `SETUP.md`. A replica's zotero container
-stops briefly during its sync window.
+stops briefly during its sync window. To verify a sync, any peer can dump its
+whole library (collections + items, keys, counts) as diff-friendly markdown:
+`scripts/library_manifest.sh [out.md]`.
 
 ## Available MCPs
 
