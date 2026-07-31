@@ -5,7 +5,7 @@
 set -u
 URL="$1"; OUTDIR="$2"; BASE="$3"
 C="${ZOTERO_CONTAINER:-zotero}"
-ZS="${ZOTERO_SETUP:-$HOME/zotero-setup}"
+ZS="${ZOTERO_SETUP:-$HOME/research-stack}"
 ZV="$ZS/.venv/bin/python"
 tmp="/tmp/cpdf_$$.pdf"
 docker exec -u 1000 "$C" bash -lc "/usr/bin/chromium-real --headless=new --no-sandbox --disable-gpu \

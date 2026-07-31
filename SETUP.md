@@ -42,6 +42,7 @@ Container uses **`network_mode: host`** — every port the container opens is di
 | `scripts/apply_config.sh` | yes | Copies Zotero `user.js` into the active profile |
 | `scripts/sync_library.sh` | yes | Two-way library sync between peers — run on the origin (section below) |
 | `scripts/snapshot_db.sh` / `place_snapshot.sh` / `merge_replica.py` | yes | Sync building blocks: crash-consistent DB snapshot, DB swap on the replica, MCP merge-replay |
+| `scripts/library_manifest.sh` | yes | Whole-library manifest (collections + items) as markdown — post-sync verification (section below) |
 | `scripts/` (the rest) | yes | Research discovery/acquisition/extraction pipeline — catalogued in `AGENTS.md` |
 | `requirements.txt` | yes | Python deps for the pipeline scripts (`.venv/bin/pip install -r`) |
 | `openwebui/` / `opencode/` / `jupyter/` | yes | Optional appliances: AI front-ends (Open WebUI, OpenCode) and JupyterLab+MCP — each with its own compose + README |
@@ -107,7 +108,7 @@ Container uses **`network_mode: host`** — every port the container opens is di
 The committed `.mcp.json` already configures **playwright** and **chrome-devtools** at project scope. Register the Zotero entry once (token comes from `.env`, never enters the repo):
 
 ```bash
-cd ~/zotero-setup
+cd ~/research-stack
 set -a; source .env; set +a
 claude mcp add zotero http://127.0.0.1:23120/mcp -t http \
   --header "Authorization: Bearer $ZOTERO_MCP_TOKEN"
@@ -206,13 +207,23 @@ overlapping runs are serialized by flock. Cron on the origin, one line per
 peer (daily at 04:17; the replica's zotero is down during its window):
 
 ```
-17 4 * * * SYNC_REPLICA=user@peer $HOME/zotero-setup/scripts/sync_library.sh >>$HOME/zotero-setup/sync.log 2>&1
+17 4 * * * SYNC_REPLICA=user@peer $HOME/research-stack/scripts/sync_library.sh >>$HOME/research-stack/sync.log 2>&1
 ```
 
 The first fill transfers the whole storage; later runs are deltas. Bring a
 new peer's zotero container up only AFTER its first fill — a freshly created
 empty DB against a full peer aborts the merge (the script explains what to
 remove).
+
+Verifying a sync: `scripts/library_manifest.sh [out.md]` (any peer; default
+stdout; `ZOTERO_API` overrides `http://localhost:23119/api/users/0` — it reads
+Zotero's local API on :23119, not the MCP plugin) dumps the entire library as
+deterministic, diff-friendly markdown: every collection with its path and
+count, every top-level item with key, type, creators, year and child
+attachment/note tallies, plus unfiled and trash. Generate it on one peer,
+ship the file (or keep it in a synced repo), regenerate on the other peer
+after its sync window — a clean `diff` means the libraries match
+key-for-key.
 
 ## What each MCP is good for
 

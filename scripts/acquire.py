@@ -14,13 +14,13 @@ Defaults log to <DISCOVERY_OUT>/acquire_<collectionKey>.json.
 Env:
   ZOTERO_MCP_TOKEN required.
   ZOTERO_MCP_URL   optional MCP URL override.
-  DISCOVERY_OUT    optional output dir (default ~/zotero-setup/.discovery).
+  DISCOVERY_OUT    optional output dir (default ~/research-stack/.discovery).
 """
 import json, os, sys, re
 
 from zotero_mcp import MCP, result_json
 
-DISC = os.environ.get("DISCOVERY_OUT", os.path.expanduser("~/zotero-setup/.discovery"))
+DISC = os.environ.get("DISCOVERY_OUT", os.path.expanduser("~/research-stack/.discovery"))
 os.makedirs(DISC, exist_ok=True)
 
 def extract_oa(extra):

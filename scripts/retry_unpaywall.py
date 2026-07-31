@@ -24,7 +24,7 @@ if not EMAIL:
 
 def unpaywall(doi):
     url = f"https://api.unpaywall.org/v2/{urllib.parse.quote(doi, safe='/')}?email={EMAIL}"
-    req = urllib.request.Request(url, headers={"User-Agent":f"zotero-setup/1.0 (mailto:{EMAIL})"})
+    req = urllib.request.Request(url, headers={"User-Agent":f"research-stack/1.0 (mailto:{EMAIL})"})
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             return json.loads(r.read().decode("utf-8"))

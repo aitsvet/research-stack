@@ -48,7 +48,7 @@ import urllib.parse
 import urllib.request
 
 EMAIL = os.environ.get("OPENALEX_EMAIL") or os.environ.get("ZOTERO_USER_EMAIL", "")
-UA = f"zotero-setup/1.0 (mailto:{EMAIL})" if EMAIL else "zotero-setup/1.0"
+UA = f"research-stack/1.0 (mailto:{EMAIL})" if EMAIL else "research-stack/1.0"
 
 # DOI pattern from https://www.crossref.org/blog/dois-and-matching-regular-expressions/
 DOI_RE = re.compile(r"\b10\.\d{4,9}/[^\s\"'<>{}()\[\]]+", re.IGNORECASE)

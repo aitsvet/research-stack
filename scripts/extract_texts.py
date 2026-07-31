@@ -19,8 +19,8 @@ Usage:
 
 Env (collection mode only):
   ZOTERO_MCP_TOKEN  required for collection mode.
-  ZOTERO_STORAGE    path to Zotero `storage/` dir (default ~/zotero-setup/config/Zotero/storage).
-  DISCOVERY_OUT     output dir parent (default ~/zotero-setup/.discovery).
+  ZOTERO_STORAGE    path to Zotero `storage/` dir (default ~/research-stack/config/Zotero/storage).
+  DISCOVERY_OUT     output dir parent (default ~/research-stack/.discovery).
 """
 import json, os, sys, subprocess, glob
 
@@ -28,8 +28,8 @@ from zotero_mcp import MCP, result_json
 
 SEP_DASHES = 48  # marker-compatible page rule width
 ZSTORE  = os.environ.get("ZOTERO_STORAGE",
-                         os.path.expanduser("~/zotero-setup/config/Zotero/storage"))
-DISC    = os.environ.get("DISCOVERY_OUT", os.path.expanduser("~/zotero-setup/.discovery"))
+                         os.path.expanduser("~/research-stack/config/Zotero/storage"))
+DISC    = os.environ.get("DISCOVERY_OUT", os.path.expanduser("~/research-stack/.discovery"))
 OUTDIR  = os.path.join(DISC, "text")
 
 os.makedirs(OUTDIR, exist_ok=True)

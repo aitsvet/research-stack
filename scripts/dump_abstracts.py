@@ -11,13 +11,13 @@ Writes <DISCOVERY_OUT>/abstracts_<collectionKey>.md per arg.
 Env:
   ZOTERO_MCP_TOKEN required.
   ZOTERO_MCP_URL   optional override (default http://127.0.0.1:23120/mcp).
-  DISCOVERY_OUT    optional output dir (default ~/zotero-setup/.discovery).
+  DISCOVERY_OUT    optional output dir (default ~/research-stack/.discovery).
 """
 import os, sys
 
 from zotero_mcp import MCP, result_json
 
-DISC = os.environ.get("DISCOVERY_OUT", os.path.expanduser("~/zotero-setup/.discovery"))
+DISC = os.environ.get("DISCOVERY_OUT", os.path.expanduser("~/research-stack/.discovery"))
 os.makedirs(DISC, exist_ok=True)
 
 def main():

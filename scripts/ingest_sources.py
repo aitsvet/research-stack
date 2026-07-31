@@ -9,7 +9,7 @@ OpenAlex/arXiv *search* discovery and DOI-bootstrap). Composes the rest of the
 stack: arXiv Atom metadata, extract_texts.py (pdf->md), fetch_pdf.sh (web->pdf),
 and zotero_mcp helpers (create/update/import/note/local-serve).
 
-    source zotero-setup/.env
+    source research-stack/.env
     ingest_sources.py manifest.json --collection KEY \
         --pdfdir DIR --notesdir DIR --state FILE [--serve-ip IP] [--only ID ...]
 

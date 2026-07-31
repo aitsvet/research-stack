@@ -31,7 +31,7 @@
 Env:
   ZOTERO_MCP_TOKEN  required, bearer token for the Zotero MCP plugin.
   OPENALEX_EMAIL    optional, polite-pool identifier (default: $ZOTERO_USER_EMAIL or anonymous).
-  DISCOVERY_OUT     optional, output dir (default: ~/zotero-setup/.discovery).
+  DISCOVERY_OUT     optional, output dir (default: ~/research-stack/.discovery).
 """
 import json, urllib.request, urllib.parse, sys, time, os, re
 from datetime import datetime, timezone
@@ -40,8 +40,8 @@ from xml.etree import ElementTree as ET
 from zotero_mcp import MCP
 
 EMAIL  = os.environ.get("OPENALEX_EMAIL") or os.environ.get("ZOTERO_USER_EMAIL", "")
-UA     = f"zotero-setup/1.0 (mailto:{EMAIL})" if EMAIL else "zotero-setup/1.0"
-OUTDIR = os.environ.get("DISCOVERY_OUT", os.path.expanduser("~/zotero-setup/.discovery"))
+UA     = f"research-stack/1.0 (mailto:{EMAIL})" if EMAIL else "research-stack/1.0"
+OUTDIR = os.environ.get("DISCOVERY_OUT", os.path.expanduser("~/research-stack/.discovery"))
 os.makedirs(OUTDIR, exist_ok=True)
 
 # ----------------------------- HTTP helpers --------------------------------

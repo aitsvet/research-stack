@@ -19,7 +19,9 @@ claude mcp add zotero http://127.0.0.1:23120/mcp -t http \
 Library sync between peers (one **origin** merges, any number of replicas;
 independent of which AI front-end runs where): `scripts/sync_library.sh` on
 the origin — design and operations in `SETUP.md`. A replica's zotero container
-stops briefly during its sync window.
+stops briefly during its sync window. To verify a sync, any peer can dump its
+whole library (collections + items, keys, counts) as diff-friendly markdown:
+`scripts/library_manifest.sh [out.md]`.
 
 ## Available MCPs
 
@@ -70,7 +72,7 @@ Every English-language paper draft pairs with **one Zotero top collection** and 
 
 ## Worldwide discovery + acquisition pipeline
 
-Run from the repo root with `.env` sourced. Each script takes Zotero `collectionKey`s as positional args; defaults to writing under `${DISCOVERY_OUT:-~/zotero-setup/.discovery}`.
+Run from the repo root with `.env` sourced. Each script takes Zotero `collectionKey`s as positional args; defaults to writing under `${DISCOVERY_OUT:-~/research-stack/.discovery}`.
 
 The pipeline is **two-pass on purpose**: pass 1 (`discover.py`) creates lightweight candidates with abstracts and OA status but **never attaches PDFs**; the user picks rows; pass 2 (`acquire.py` + `retry_unpaywall.py`) fetches OA full text only for selected items. Bulk-acquiring during discovery wastes bandwidth and drags in HTML/paywall noise that has to be re-cleaned.
 
@@ -139,7 +141,7 @@ Once `extract_texts.py` has produced the per-item `.txt`, drive synthesis off th
 - **OpenAlex `oa_url` is unreliable** for hybrid/bronze OA — it often points to a publisher landing page rather than a PDF. Always have `retry_unpaywall.py` as a second pass; Unpaywall's repository-hosted `oa_locations` are higher-yield for automated fetch.
 - **arXiv = Atom XML, not JSON.** Parse with `xml.etree.ElementTree` and namespace `{http://www.w3.org/2005/Atom}`. Field prefixes are `ti:`, `abs:`, `all:`. DOI is usually absent on preprints — dedupe by arXiv ID, and dedupe against OpenAlex hits both ways.
 - **Bot-protection lands as HTML, not PDF — and survives into the text corpus.** Anubis / Cloudflare interstitials let Zotero "succeed" but store a tiny HTML page, and its `.zotero-ft-cache` then extracts as an interstitial. `file config/Zotero/storage/<key>/*` after a batch (anything not `PDF document` needs re-acquisition), and after `extract_texts.py` grep the `text/` corpus for `checking your browser|just a moment|human verification|enable javascript` plus flag suspiciously short files — re-acquire those via the browser playbook above.
-- **`extract_texts.py` storage path + `pdftotext`.** The default `ZOTERO_STORAGE` is `~/zotero-setup/config/Zotero/storage`; set the env var explicitly for any other layout — a wrong path yields "NO PDF FOUND" for every item. `pdftotext` (poppler) is optional: the script falls back to pymupdf (already a requirement) when the binary is absent.
+- **`extract_texts.py` storage path + `pdftotext`.** The default `ZOTERO_STORAGE` is `~/research-stack/config/Zotero/storage`; set the env var explicitly for any other layout — a wrong path yields "NO PDF FOUND" for every item. `pdftotext` (poppler) is optional: the script falls back to pymupdf (already a requirement) when the binary is absent.
 - **OpenAlex / Unpaywall politeness.** Both expect an email (`OPENALEX_EMAIL` / `UNPAYWALL_EMAIL`). Unpaywall hard-requires it.
 - **Refining a noisy topic is a two-pass norm.** Scan the top 10 hits; if noisy, grep itemKeys from the `get_collection_items` dump, `batch_trash` them (≤100 per call), then re-run `discover.py` with a tightened query. Cheaper than over-engineering the query upfront.
 - **AI-generated bibliographies hallucinate authors at correctly-formed DOIs.** A significant fraction of LLM-generated citations resolve to a real paper at the cited DOI but with completely different authors / venue / title. The DOI looks valid because it *is* valid — just for a different paper than the prose claims. Always run `verify_refs.py` before submission; treat any AUTHORS / TITLE / VENUE finding as blocking. For a formatted numbered reference list use `--per-line`, format each entry `Authors. Title // *Full Journal Name* doi:...` (ISO-690 ` // ` splits title from venue; use the unabbreviated journal name), and note that a shortened title (subtitle dropped) shows as a low-overlap TITLE flag — complete it from the Crossref title rather than assume a wrong-paper.

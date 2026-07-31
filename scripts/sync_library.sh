@@ -11,8 +11,8 @@
 # Variables:
 #   SYNC_REPLICA       ssh address of the replica (user@host). Empty = local
 #                      test: the replica is the local path SYNC_REPLICA_ROOT.
-#   SYNC_REPLICA_ROOT  path of zotero-setup on the replica (default
-#                      "zotero-setup", relative to $HOME there).
+#   SYNC_REPLICA_ROOT  path of research-stack on the replica (default
+#                      "research-stack", relative to $HOME there).
 #   SYNC_SSH_KEY       dedicated ssh key (default: regular ssh identity).
 #
 # --dry-run: merge plan + rsync volumes; containers and DBs are untouched
@@ -22,7 +22,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 REPLICA="${SYNC_REPLICA-}"
-RROOT="${SYNC_REPLICA_ROOT:-zotero-setup}"
+RROOT="${SYNC_REPLICA_ROOT:-research-stack}"
 SYNC="$ROOT/.sync"
 KEY="${SYNC_SSH_KEY-}"
 
