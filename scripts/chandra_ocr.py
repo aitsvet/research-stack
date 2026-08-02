@@ -22,8 +22,10 @@ import base64
 import json
 import os
 import sys
+import threading
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 import fitz  # PyMuPDF
 
@@ -86,6 +88,17 @@ def ocr_page(img_bytes, mime, url, model, api_key, max_tokens, timeout):
     return data["choices"][0]["message"]["content"]
 
 
+_local = threading.local()
+
+
+def _thread_page(path, i):
+    """A page from a per-thread Document — fitz objects are not shareable."""
+    doc = getattr(_local, "doc", None)
+    if doc is None:
+        doc = _local.doc = fitz.open(path)
+    return doc[i]
+
+
 def render_jpeg(page, dpi, min_dim, max_dim, quality, shrink=1.0):
     """Render to JPEG. Resolution = max(dpi, min-dim-driven dpi), but the
     longest side is capped at max_dim px (keeps vision-token count and request
@@ -118,21 +131,27 @@ def main():
     ap.add_argument("--max-tokens", type=int, default=9000)
     ap.add_argument("--timeout", type=int, default=600)
     ap.add_argument("--api-key", default=os.environ.get("CHANDRA_API_KEY", ""))
+    ap.add_argument("--concurrency", type=int, default=1,
+                    help="pages in flight at once. A page is decode-bound, and "
+                         "vLLM batches, so 4-8 cuts wall-clock near-linearly on "
+                         "long scans; keep 1 to leave a shared endpoint alone.")
     a = ap.parse_args()
 
     out_path = a.out or (os.path.splitext(a.pdf)[0] + ".md")
-    doc = fitz.open(a.pdf)
-    n = len(doc)
-    print(f"[chandra] {a.pdf}: {n} page(s) -> {out_path}", file=sys.stderr)
-    pages_md = []
-    for i, page in enumerate(doc):
+    with fitz.open(a.pdf) as probe:
+        n = len(probe)
+    print(f"[chandra] {a.pdf}: {n} page(s) -> {out_path}"
+          f"{'' if a.concurrency == 1 else f', {a.concurrency} in flight'}",
+          file=sys.stderr)
+
+    def ocr_one(i):
         html = None
         # progressive fallback if the endpoint rejects size/context
         for shrink, mtok in ((1.0, a.max_tokens), (0.8, min(a.max_tokens, 7000)),
                              (0.65, 5000)):
             try:
-                jpg, w, h = render_jpeg(page, a.dpi, a.min_dim, a.max_dim,
-                                        a.jpeg_quality, shrink)
+                jpg, w, h = render_jpeg(_thread_page(a.pdf, i), a.dpi, a.min_dim,
+                                        a.max_dim, a.jpeg_quality, shrink)
                 kb = len(jpg) // 1024
                 print(f"[chandra] page {i + 1}/{n} {w}x{h} jpg={kb}KB "
                       f"shrink={shrink} ...", file=sys.stderr)
@@ -146,8 +165,13 @@ def main():
                 print(f"[chandra] page {i + 1} {type(e).__name__}: {e} -> retry smaller",
                       file=sys.stderr)
         md = html_to_md(html) if html else "*[OCR FAILED FOR THIS PAGE]*"
-        pages_md.append(f"{{{i}}}{PAGE_SEP}\n\n{md}")
-    doc.close()
+        return f"{{{i}}}{PAGE_SEP}\n\n{md}"
+
+    if a.concurrency > 1:
+        with ThreadPoolExecutor(max_workers=a.concurrency) as pool:
+            pages_md = list(pool.map(ocr_one, range(n)))   # map preserves order
+    else:
+        pages_md = [ocr_one(i) for i in range(n)]
 
     with open(out_path, "w", encoding="utf-8") as f:
         f.write("\n\n" + "\n\n".join(pages_md) + "\n")
