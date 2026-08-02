@@ -121,6 +121,23 @@ services:
       - zotero
     restart: unless-stopped
 
+  ############################
+  # docconv — office documents (.rtf/.doc/.docx/.odt) -> Markdown
+  ############################
+  # One-shot batch converter, not a daemon. Keeps LibreOffice off the host.
+  #   docker compose --profile tools run --rm docconv /corpus/<subdir> --dry-run
+  #   docker compose --profile tools run --rm docconv /corpus/<subdir>
+  # CORPUS points at the document tree to convert (default: ../literature).
+  docconv:
+    build: ./docker/docconv
+    image: research-stack/docconv:latest
+    profiles: ["tools"]
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    volumes:
+      - ./scripts:/opt/scripts:ro
+      - ${CORPUS:-../literature}:/corpus
+    working_dir: /corpus
+
 volumes:
   gptproxy_open-webui:
     external: true
