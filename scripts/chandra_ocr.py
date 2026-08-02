@@ -26,7 +26,6 @@ import urllib.error
 import urllib.request
 
 import fitz  # PyMuPDF
-from bs4 import BeautifulSoup, NavigableString, Tag
 
 # Verbatim from upstream chandra/prompts.py. The model was trained against
 # this exact wording; do not paraphrase.
@@ -51,133 +50,9 @@ Guidelines:
 PAGE_SEP = "-" * 48  # marker-compatible {N} + 48 dashes
 
 
-# --------------------------------------------------------------------------- #
-# HTML -> Markdown
-# --------------------------------------------------------------------------- #
-def _cell_text(el):
-    return " ".join(el.get_text(" ", strip=True).split())
-
-
-def _table_md(table):
-    rows = []
-    for tr in table.find_all("tr"):
-        cells = [_cell_text(c) for c in tr.find_all(["th", "td"])]
-        if any(cells):
-            rows.append(cells)
-    if not rows:
-        return ""
-    width = max(len(r) for r in rows)
-    rows = [r + [""] * (width - len(r)) for r in rows]
-    header, body = rows[0], rows[1:]
-    out = ["| " + " | ".join(header) + " |",
-           "| " + " | ".join(["---"] * width) + " |"]
-    for r in body:
-        out.append("| " + " | ".join(r) + " |")
-    return "\n".join(out)
-
-
-def _inline(node):
-    if isinstance(node, NavigableString):
-        return str(node)
-    if not isinstance(node, Tag):
-        return ""
-    name = node.name
-    inner = "".join(_inline(c) for c in node.children)
-    if name in ("b", "strong", "big"):
-        return f"**{inner.strip()}**" if inner.strip() else ""
-    if name in ("i", "em"):
-        return f"*{inner.strip()}*" if inner.strip() else ""
-    if name == "del":
-        return f"~~{inner.strip()}~~" if inner.strip() else ""
-    if name == "sup":
-        return f"^{inner}^"
-    if name == "sub":
-        return f"_{inner}_"
-    if name == "br":
-        return "  \n"
-    if name == "math":
-        expr = inner.strip()
-        return f"$$ {expr} $$" if node.get("display") else f"${expr}$"
-    if name == "chem":
-        return f"`{inner.strip()}`"
-    if name == "code":
-        return f"`{inner.strip()}`"
-    if name == "a":
-        href = node.get("href")
-        return f"[{inner.strip()}]({href})" if href else inner
-    if name == "img":
-        alt = (node.get("alt") or "").strip()
-        return f"![{alt}]()" if alt else ""
-    return inner  # span, u, small, input, etc. -> pass through
-
-
-def _block(node, out):
-    if isinstance(node, NavigableString):
-        t = str(node).strip()
-        if t:
-            out.append(t)
-        return
-    if not isinstance(node, Tag):
-        return
-    name = node.name
-    if name in ("h1", "h2", "h3", "h4", "h5", "h6"):
-        lvl = int(name[1])
-        txt = " ".join(_inline(node).split())
-        if txt:
-            out.append("#" * lvl + " " + txt)
-        return
-    if name == "p":
-        txt = _inline(node).strip()
-        if txt:
-            out.append(txt)
-        return
-    if name == "table":
-        md = _table_md(node)
-        if md:
-            out.append(md)
-        return
-    if name in ("ul", "ol"):
-        ordered = name == "ol"
-        for i, li in enumerate(node.find_all("li", recursive=False), 1):
-            marker = f"{i}." if ordered else "-"
-            txt = " ".join(_inline(li).split())
-            if txt:
-                out.append(f"{marker} {txt}")
-        return
-    if name == "hr":
-        out.append("---")
-        return
-    if name == "pre":
-        out.append("```\n" + node.get_text() + "\n```")
-        return
-    if name in ("div", "span", "tbody", "thead", "caption", "small"):
-        # container: recurse into children as blocks
-        children = [c for c in node.children if isinstance(c, (Tag, NavigableString))]
-        if any(isinstance(c, Tag) and c.name in
-               ("p", "div", "table", "ul", "ol", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "pre")
-               for c in children):
-            for c in children:
-                _block(c, out)
-        else:
-            txt = _inline(node).strip()
-            if txt:
-                out.append(txt)
-        return
-    # fallback: treat as inline block
-    txt = _inline(node).strip()
-    if txt:
-        out.append(txt)
-
-
-def html_to_md(html):
-    soup = BeautifulSoup(html or "", "html.parser")
-    root = soup.body or soup
-    out = []
-    for child in root.children:
-        _block(child, out)
-    # collapse excessive blank lines
-    return "\n\n".join(b for b in (x.strip() for x in out) if b)
-
+# HTML -> Markdown lives in html_md.py (shared with convert_office.py, which
+# runs in a LibreOffice container and must not pull in PyMuPDF).
+from html_md import html_to_md
 
 # --------------------------------------------------------------------------- #
 # Chandra endpoint
