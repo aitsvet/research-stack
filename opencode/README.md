@@ -1,7 +1,7 @@
 # OpenCode
 
 Optional AI front-end for the stack (an alternative to Claude Code or
-`../openwebui`): OpenCode web UI in a container, plus an opt-in Telegram
+`../open-webui`): OpenCode web UI in a container, plus an opt-in Telegram
 bridge.
 
 ```bash

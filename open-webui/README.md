@@ -21,7 +21,7 @@
 cd ~ && git clone <репозиторий> research-stack && cd research-stack
 $EDITOR .env                              # ZOTERO_USER/PASSWORD, ZOTERO_MCP_TOKEN
 docker compose up -d                      # контейнер zotero
-cd openwebui
+cd open-webui
 cp .env.example .env && $EDITOR .env      # ключ DashScope, WEBUI_SECRET_KEY, учётка
 docker compose up -d
 ./install_function.sh                     # ставит пайп, печатает список моделей
