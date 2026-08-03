@@ -46,7 +46,7 @@ Container uses **`network_mode: host`** — every port the container opens is di
 | `scripts/` (the rest) | yes | Research discovery/acquisition/extraction pipeline — catalogued in `AGENTS.md` |
 | `docker/docconv/` | yes | Image for the `docconv` service: LibreOffice headless for office-document → Markdown conversion, kept off the host. Batch, not a daemon — `docker compose --profile tools run --rm docconv <dir>`; point `CORPUS` at the tree to convert (default `../literature`). |
 | `requirements.txt` | yes | Python deps for the pipeline scripts (`.venv/bin/pip install -r`) |
-| `openwebui/` / `opencode/` / `jupyter/` | yes | Optional appliances: AI front-ends (Open WebUI, OpenCode) and JupyterLab+MCP — each with its own compose + README |
+| `open-webui/` / `opencode/` / `jupyter/` | yes | Optional appliances: AI front-ends (Open WebUI, OpenCode) and JupyterLab+MCP — each with its own compose + README |
 | `user.js` | yes | Zotero MCP plugin prefs — `requireAuth=true`, all write scopes on |
 | `.env` | **no** | Real secrets: web-UI password, Zotero MCP token |
 | `config/` | **no** | Zotero profile, library, attachments, installed `.xpi` plugins |

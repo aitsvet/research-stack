@@ -1,6 +1,6 @@
 # Open WebUI + Qwen
 
-Дополнительный контейнер поверх стека `research-stack`: Open WebUI с агентом на
+Дополнительный контейнер поверх стека `zotero-setup`: Open WebUI с агентом на
 моделях Qwen (DashScope / Alibaba Model Studio). Ставится на любой сервер со
 стеком. Синхронизация библиотеки Zotero между серверами — отдельная,
 независимая от OWUI подсистема: SETUP.md, «Library sync between peers».
@@ -18,10 +18,10 @@
 ## Развёртывание
 
 ```bash
-cd ~ && git clone <репозиторий> research-stack && cd research-stack
+cd ~ && git clone <репозиторий> zotero-setup && cd zotero-setup
 $EDITOR .env                              # ZOTERO_USER/PASSWORD, ZOTERO_MCP_TOKEN
 docker compose up -d                      # контейнер zotero
-cd openwebui
+cd open-webui
 cp .env.example .env && $EDITOR .env      # ключ DashScope, WEBUI_SECRET_KEY, учётка
 docker compose up -d
 ./install_function.sh                     # ставит пайп, печатает список моделей
