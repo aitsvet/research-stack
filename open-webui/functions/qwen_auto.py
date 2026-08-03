@@ -1,10 +1,12 @@
 """
 title: Qwen Auto
 author: local
-version: 0.5.1
-description: Один чат — четыре модели. Текст идёт в qwen3-max, картинка на входе в
-    qwen3-vl, а рисование и правку картинок модель вызывает сама как инструменты
-    (qwen-image / qwen-image-edit через нативный DashScope API).
+version: 0.6.0
+description: Один чат — три роли. Текст и картинка на входе идут в TEXT_MODEL и
+    VISION_MODEL, а рисование и правку изображений модель вызывает сама как
+    инструменты (IMAGE_MODEL через нативный DashScope API).
+    Имена моделей не вбиты в код: они в валвах, потому что каталог моделей —
+    свойство эндпоинта, а не аккаунта, и при переезде меняется целиком.
     Внешние инструменты OWUI (Zotero, Playwright, Terminal) доступны через
     native function calling — модель сама решает, когда их вызвать.
 """
@@ -23,6 +25,11 @@ log = logging.getLogger(__name__)
 
 NATIVE_PATH = "/api/v1/services/aigc/multimodal-generation/generation"
 
+# Один хост на оба API: и OpenAI-совместимый, и нативный (image-модели живут
+# только в нём). Раньше адрес был записан в двух валвах по отдельности, и при
+# переезде одну из них забывали — пайп отвечал текстом, но переставал рисовать.
+DEFAULT_HOST = "https://token-plan.ap-southeast-1.maas.aliyuncs.com"
+
 MAX_TOOL_ROUNDS = 16
 
 
@@ -33,30 +40,29 @@ class Pipe:
             description="Ключ Model Studio; по умолчанию — из окружения контейнера",
         )
         COMPAT_BASE_URL: str = Field(
-            default=os.getenv(
-                "DASHSCOPE_BASE_URL",
-                "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-            ),
+            default=os.getenv("DASHSCOPE_BASE_URL", DEFAULT_HOST + "/compatible-mode/v1"),
             description="OpenAI-совместимый эндпоинт для текстовых и VL-моделей",
         )
         NATIVE_BASE_URL: str = Field(
-            default=os.getenv(
-                "DASHSCOPE_NATIVE_URL", "https://dashscope-intl.aliyuncs.com"
-            ),
+            default=os.getenv("DASHSCOPE_NATIVE_URL", DEFAULT_HOST),
             description="Корень нативного API для image-моделей (без /api/v1)",
         )
-        TEXT_MODEL: str = Field(default=os.getenv("QWEN_TEXT_MODEL", "qwen3-max"))
-        VISION_MODEL: str = Field(default=os.getenv("QWEN_VISION_MODEL", "qwen3-vl-plus"))
-        IMAGE_MODEL: str = Field(default=os.getenv("QWEN_IMAGE_MODEL", "qwen-image-2.0"))
+        # Проверено на этом эндпоинте: 3.8 переписывает картинку дословно —
+        # сохраняет опечатку, транслит и апостроф. qwen3.6-flash дешевле и
+        # быстрее, но «закят» у него превращается в «закат»: для расшифровки
+        # доски правдоподобная незаметная подмена хуже явной ошибки.
+        TEXT_MODEL: str = Field(default=os.getenv("QWEN_TEXT_MODEL", "qwen3.8-max-preview"))
+        VISION_MODEL: str = Field(
+            default=os.getenv("QWEN_VISION_MODEL", "qwen3.8-max-preview")
+        )
+        # Рисование и правка — одна и та же модель: wan2.7 принимает и голый
+        # текст, и «картинка + указание». Валва две, потому что роли разные и
+        # правку не жалко увести на -pro, но по умолчанию они совпадают.
+        IMAGE_MODEL: str = Field(default=os.getenv("QWEN_IMAGE_MODEL", "wan2.7-image"))
         IMAGE_EDIT_MODEL: str = Field(
-            default=os.getenv("QWEN_IMAGE_EDIT_MODEL", "qwen-image-edit-plus")
+            default=os.getenv("QWEN_IMAGE_EDIT_MODEL", "wan2.7-image")
         )
         IMAGE_SIZE: str = Field(default="1328*1328")
-        ENABLE_SEARCH: bool = Field(
-            default=os.getenv("QWEN_ENABLE_SEARCH", "true").lower()
-            in ("1", "true", "yes"),
-            description="Родной веб-поиск DashScope для текстовой ветки.",
-        )
         PERSIST_IMAGES: bool = Field(
             default=True,
             description="Складывать результат в файловое хранилище Open WebUI.",
@@ -331,15 +337,22 @@ class Pipe:
 
     async def _render(
         self, client: httpx.AsyncClient, model: str, content: list,
-        user_id: Optional[str] = None,
+        user_id: Optional[str] = None, size: Optional[str] = None,
     ) -> str:
+        """Нативный вызов image-модели. `size` задаётся только при рисовании.
+
+        Раньше признаком «это рисование» было совпадение имени модели с
+        IMAGE_MODEL. Пока модели рисования и правки были разные, это работало;
+        теперь обе — wan2.7, и правка молча получала бы навязанный размер
+        холста вместо размера исходной картинки.
+        """
         body = {
             "model": model,
             "input": {"messages": [{"role": "user", "content": content}]},
             "parameters": {"watermark": self.valves.WATERMARK},
         }
-        if model == self.valves.IMAGE_MODEL:
-            body["parameters"]["size"] = self.valves.IMAGE_SIZE
+        if size:
+            body["parameters"]["size"] = size
 
         resp = await client.post(
             self.valves.NATIVE_BASE_URL.rstrip("/") + NATIVE_PATH,
@@ -592,6 +605,7 @@ class Pipe:
                             result = await self._render(
                                 client, self.valves.IMAGE_MODEL,
                                 [{"text": args.get("prompt", "")}], user_id,
+                                size=self.valves.IMAGE_SIZE,
                             )
                             if result and "![" in result:
                                 image_mds.append(result)

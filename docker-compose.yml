@@ -30,14 +30,24 @@ services:
       - WEBUI_URL=${WEBUI_URL:-http://localhost:4096}
       - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
       - WEBUI_AUTH=True
-      # DashScope / Qwen models via OpenAI-compatible API
+      # DashScope / Qwen models. These are DEFAULTS for the qwen_auto pipe's
+      # valves — Open WebUI stores valve values in its own DB, so changing them
+      # here does not touch an already-installed pipe (set those in the UI).
+      # Model names belong to the endpoint, not to the account: the token-plan
+      # host serves ten models and none of the old names. Check the catalogue
+      # with `GET $DASHSCOPE_BASE_URL/models` before changing the base URL.
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
-      - DASHSCOPE_BASE_URL=https://dashscope-intl.aliyuncs.com/compatible-mode/v1
-      - QWEN_ENABLE_SEARCH=true
-      - QWEN_TEXT_MODEL=qwen3-max
-      - QWEN_VISION_MODEL=qwen3-vl-plus
-      - QWEN_IMAGE_MODEL=qwen-image-2.0
-      - QWEN_IMAGE_EDIT_MODEL=qwen-image-edit-plus
+      - DASHSCOPE_BASE_URL=${DASHSCOPE_BASE_URL:-https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1}
+      # Image models live only on the native API, on the same host.
+      - DASHSCOPE_NATIVE_URL=${DASHSCOPE_NATIVE_URL:-https://token-plan.ap-southeast-1.maas.aliyuncs.com}
+      # Verified verbatim on a photo of text: qwen3.8 keeps a typo, a translit
+      # and an apostrophe intact; qwen3.6-flash silently turns «закят» into
+      # «закат», which is the worst kind of error for a transcript.
+      - QWEN_TEXT_MODEL=${QWEN_TEXT_MODEL:-qwen3.8-max-preview}
+      - QWEN_VISION_MODEL=${QWEN_VISION_MODEL:-qwen3.8-max-preview}
+      # One model draws and edits: wan2.7 takes both bare text and image+instruction.
+      - QWEN_IMAGE_MODEL=${QWEN_IMAGE_MODEL:-wan2.7-image}
+      - QWEN_IMAGE_EDIT_MODEL=${QWEN_IMAGE_EDIT_MODEL:-wan2.7-image}
       # Model defaults
       - DEFAULT_MODELS=qwen_auto
       - DEFAULT_PINNED_MODELS=qwen_auto
