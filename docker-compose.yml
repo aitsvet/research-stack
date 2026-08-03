@@ -52,8 +52,14 @@ services:
       - DEFAULT_MODELS=qwen_auto
       - DEFAULT_PINNED_MODELS=qwen_auto
       - ENABLE_BASE_MODELS_CACHE=True
-      # Web search — SearXNG (self-hosted)
-      - ENABLE_WEB_SEARCH=True
+      # Open WebUI's evaluation arena injects a fake "Arena Model" entry into
+      # the model picker — not wanted here.
+      - ENABLE_EVALUATION_ARENA_MODELS=${ENABLE_EVALUATION_ARENA_MODELS:-false}
+      # Web search — SearXNG (self-hosted). The built-in OWUI web search is
+      # off by default: it re-searches every message and doesn't see the pipe's
+      # own search_web/fetch_url, so it duplicates and pollutes. Pipe tools
+      # talk to the same SearXNG directly.
+      - ENABLE_WEB_SEARCH=${ENABLE_WEB_SEARCH:-false}
       - WEB_SEARCH_ENGINE=searxng
       - SEARXNG_QUERY_URL=http://127.0.0.1:9090/search
       - WEB_SEARCH_TRUST_ENV=true
