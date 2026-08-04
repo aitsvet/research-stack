@@ -14,6 +14,13 @@ EXT_DIR=${CHROMIUM_EXT:-}
 EXT_FLAG=""
 [ -n "$EXT_DIR" ] && EXT_FLAG="--load-extension=$EXT_DIR --disable-features=DisableLoadExtensionCommandLineSwitch"
 
+# Optional egress proxy, e.g. CHROMIUM_PROXY=socks5://localhost:3333 for sites
+# that refuse datacenter/foreign IPs (tc26.ru, sozd, pravo). The container runs
+# on the host network, so a host-side proxy is reachable at localhost.
+PROXY=${CHROMIUM_PROXY:-}
+PROXY_FLAG=""
+[ -n "$PROXY" ] && PROXY_FLAG="--proxy-server=$PROXY"
+
 docker exec "$CONTAINER" bash -c "pkill -f 'user-data-dir=$DATA_DIR' || true; sleep 2; rm -f $DATA_DIR/SingletonLock $DATA_DIR/SingletonCookie $DATA_DIR/SingletonSocket" 2>/dev/null || true
 
 # Bypass the linuxserver wrapper (/usr/bin/chromium) — it hardcodes
@@ -42,6 +49,7 @@ docker exec -u 1000 -d "$CONTAINER" bash -c "
     --remote-debugging-port=$DEBUG_PORT \
     --remote-allow-origins=* \
     --user-data-dir=$DATA_DIR \
+    $PROXY_FLAG \
     $EXT_FLAG \
     > /tmp/chromium.log 2>&1
 "
