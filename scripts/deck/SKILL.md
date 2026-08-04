@@ -5,6 +5,11 @@ extended, or reviewed for layout quality — new decks, slides added to a
 foreign deck, or auditing a generated one. It does not depend on any Claude
 plugin/skill machinery; everything runs from here with `../../.venv/bin/python`.
 
+For a deck authored as hand-written HTML rather than as a .pptx, the engine and
+the user-fillable image slot live in `html/` — see `html/README.md` for wiring,
+the animation-gating rule, and the CSS class-name collision that silently
+truncates layout.
+
 **Core discipline: never emit or trust guessed geometry.** Every failure mode
 this pipeline exists for came from estimated text sizes and hand-arithmetic
 alignment. Measure (browser or TTF), align by engine or by assertion, verify
