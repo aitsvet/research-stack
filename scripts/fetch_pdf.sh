@@ -11,7 +11,7 @@ tmp="/tmp/cpdf_$$.pdf"
 docker exec -u 1000 "$C" bash -lc "/usr/bin/chromium-real --headless=new --no-sandbox --disable-gpu \
   --blink-settings=imagesEnabled=false --user-data-dir=/tmp/cpdf_$$ \
   --print-to-pdf=/tmp/o_$$.pdf --print-to-pdf-no-header --no-pdf-header-footer \
-  --virtual-time-budget=15000 '$URL'" >/dev/null 2>&1
+  --virtual-time-budget=${FETCH_PDF_BUDGET:-15000} '$URL'" >/dev/null 2>&1
 docker cp "$C:/tmp/o_$$.pdf" "$OUTDIR/$BASE.pdf" 2>/dev/null
 docker exec "$C" rm -f "/tmp/o_$$.pdf" 2>/dev/null
 docker exec -u 1000 "$C" rm -rf "/tmp/cpdf_$$" 2>/dev/null
