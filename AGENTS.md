@@ -33,6 +33,7 @@ whole library (collections + items, keys, counts) as diff-friendly markdown:
 
 ## Don't waste cycles
 
+- **Compose the existing toolkit before writing anything new.** The script table below is the catalog — read it first. Reusable logic belongs here (domain-agnostic); only project DATA (manifests, state files) goes in the project repo, never numbered one-off scripts. If a genuinely missing primitive comes up, generalize it into this repo instead of burying it in a bespoke script. Same rule for installed skills: a skill's own helpers ARE the toolkit — hand-rolling a shell equivalent right after installing it is the same failure.
 - **Keep this stack domain-agnostic.** Scripts and docs here must be parameterised and universal — no corpus/project-specific data (file paths, site names like a particular journal/registry, subject terminology, item keys, one-shot ingest scripts). That belongs in the *project* repo (e.g. `<project>/scripts/`), which may import `zotero_mcp.py` from here. If you find domain specifics leaking in, move them out.
 - Secrets stay in `.env` + `~/.claude.json`, never committed (HTTP-header `${VAR}` substitution is broken in Claude Code).
 - Don't ever launch `/usr/bin/chromium` — the wrapper breaks input. `launch_chromium.sh` already calls the real binary correctly.
@@ -124,6 +125,19 @@ The pipeline is **two-pass on purpose**: pass 1 (`discover.py`) creates lightwei
 ## Corpus → grounded draft (synthesis)
 
 Once `extract_texts.py` has produced the per-item `.txt`, drive synthesis off those, never the PDFs. Fan out **one reader-subagent per section** over just that section's `text/<itemKey>.txt`; each returns a short digest — citeable points tagged with the `itemKey`, the key caveats, and an explicit list of claims it could **not** find in the text (so nothing gets invented to fill a gap). The orchestrator writes the draft from the digests, keeping its own context lean. Build the reference list from Crossref (pull first-author / year / venue per DOI) rather than from model memory — that removes the hallucinated-author failure mode at the source — then gate on `verify_refs.py --per-line` before declaring done.
+
+## Network routes to state and paywalled sources
+
+- **Probe the route before spending browser timeouts.** `</dev/tcp/host/443` answers in a second whether the host is reachable at all; a 60-second Chromium timeout tells you the same thing sixty times slower.
+- **Russian state portals** (`sozd.duma.gov.ru`, `duma.gov.ru`, `publication.pravo.gov.ru`) TCP-block both the host network and server-side WebFetch. A **SOCKS5 proxy on `localhost:3333`** (ask the user to bring it up) clears them for `curl --socks5-hostname` and, via `CHROMIUM_PROXY=socks5://localhost:3333 ./scripts/launch_chromium.sh`, for the container browser too. `publication.pravo.gov.ru/api/Documents?name=<number>` then serves official-publication metadata, and `…/file/pdf?eoNumber=<eo>` the signed PDF.
+- **`cbr.ru`** is TCP-open and answers plain `curl` as long as a browser `User-Agent` is set; no proxy needed. Its site search resolves a bare act number to a file id (`/ref/analytics/na_vr/file/<id>`), which downloads from `/Queries/UniDbQuery/File/90134/<id>`.
+- **`tc26.ru`** rejects datacenter addresses outright — it needs the proxy on both curl and Chromium.
+- **Consolidated legal texts** (an act *with* its amendments) come from the free web version of a legal database, split one page per chapter and reassembled; the official portal publishes only the signed original, which is a scan and predates every amendment. Verify the document id by fetching it and reading the title before trusting it — a guessed id silently returns a different act.
+
+## Full text of a commercial book
+
+- Mirrors advertising «читать бесплатно полную версию» almost always serve the vendor's trial fragment relabeled. Detect **before** converting: the tail carries the vendor's boilerplate, the table of contents has ~3 sections, and the text is several times smaller than the page count implies (~2K characters per printed page is the sane ratio).
+- Completeness is verified after download (section count, volume, tail of the text) — until then the file is not acquired.
 
 ## Acquiring bot-walled OA sources (browser playbook)
 
