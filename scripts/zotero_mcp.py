@@ -98,12 +98,20 @@ def import_local_files(mcp, jobs, public_ip, port=28765,
         public_ip : a routable host IP reachable from the Zotero process
                     (`hostname -I`; NOT 127.0.0.1 / 10. / 172.16. / 192.168.)
     Returns [(parentItemKey, ok_bool, text)]. Serves a temp dir only (never the
-    repo root); uses system python3 so it works regardless of venv."""
-    import tempfile, shutil, subprocess, time as _t, os as _os
+    repo root); uses system python3 so it works regardless of venv.
+
+    Staged names are forced to ASCII: the importer validates the URL string and
+    rejects non-ASCII paths as "Invalid attachment URL", so a Cyrillic filename
+    fails here even though everything else is correct. The original name is
+    irrelevant downstream — Zotero titles the attachment from `title`."""
+    import tempfile, shutil, subprocess, time as _t, os as _os, re as _re
     staging = tempfile.mkdtemp(prefix="zimp_")
     names = []
     for i, (path, _key, _title) in enumerate(jobs):
-        nm = "f%d_%s" % (i, _os.path.basename(path).replace(" ", "_"))
+        ext = _os.path.splitext(path)[1]
+        stem = _re.sub(r"[^A-Za-z0-9._-]+", "_",
+                       _os.path.splitext(_os.path.basename(path))[0])
+        nm = "f%d_%s%s" % (i, stem.strip("_")[:40] or "file", ext)
         shutil.copyfile(path, _os.path.join(staging, nm)); names.append(nm)
     srv = subprocess.Popen(["python3", "-m", "http.server", str(port),
                             "--bind", "0.0.0.0", "--directory", staging],
