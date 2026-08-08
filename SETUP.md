@@ -239,10 +239,14 @@ key-for-key.
 
 ## Security notes
 
-- **`network_mode: host`** removes the container/host network isolation. Anything the container binds to `0.0.0.0` is exposed on every host interface. Make sure:
-  - The Zotero MCP plugin binds `127.0.0.1` (or auth is required *and* the host is firewalled).
-  - The web UI on `:8888` is only reached via SSH tunnel; do not expose to the public Internet without a real reverse proxy + cert.
-  - The host has a firewall (`ufw deny in on eth0 to any port 8888,23120,9222`) if it has a public IP.
+Standing rule for the host: **nothing binds `0.0.0.0` except sshd (`:22`) and the system nginx (`:80`/`:443`)**. Every stack service binds `127.0.0.1` and is reached over an SSH tunnel — or, when a front-end is deliberately published, through the system nginx reverse proxy (TLS + auth) proxying from loopback. A default-deny firewall (`ufw`) stays on as the backstop, not the primary control; note that Docker *bridge*-published ports bypass ufw entirely, so any `ports:` mapping must be written `127.0.0.1:host:container`.
+
+- **`network_mode: host`** removes the container/host network isolation — every in-container bind lands directly on a host interface. How each service is pinned to loopback:
+  - Zotero web UI (`:8888`, http `:3000`): `docker/zotero/default.conf` mounted over `/defaults/default.conf` (the image's init regenerates the live nginx conf from it on every start), plus `DISABLE_IPV6=true` to drop the `[::]` listens.
+  - Zotero MCP plugin (`:23120`): `allowRemote=false` in `user.js` — under host networking the container loopback *is* the host loopback, so the host still reaches it.
+  - Open WebUI (`:4096`): `HOST=127.0.0.1`. searxng (`:9090`): `GRANIAN_HOST=127.0.0.1`. mcpo (`:9320`): `--host 127.0.0.1`. open-terminal: `run --host 127.0.0.1`. jupyter-mcp (`:4040`): bind sed-patched after install (upstream hardcodes 0.0.0.0). Chromium CDP (`:9222`) binds loopback by default.
+  - Selkies data websocket (`:8082`): upstream hardcodes `0.0.0.0` with no CLI/env knob, so `docker/zotero/selkies-loopback.sh` (mounted into `/custom-cont-init.d`) seds the package source to loopback on every container start. The stream keeps working — the image's nginx proxies `/websocket` to `127.0.0.1:8082`. Do **not** try to disable the selkies service instead: it leads the desktop session that Zotero (and thus the MCP) and Chromium run in.
+- The web UI on `:8888` is only reached via SSH tunnel; never expose it directly.
 - **Secrets**: `.env` is gitignored. The token also ends up in `~/.claude.json` once you run `claude mcp add` — that file is per-user, not in the repo, but treat it like a secret store (don't commit it elsewhere, don't share screenshots of it).
 - **Plugin write scopes** default to off. Re-enable selectively if you want me to modify your library.
 - **`--remote-allow-origins=*` is intentionally *not* set** on Chromium — CDP is only reachable on `127.0.0.1:9222` which on host networking means localhost only.
