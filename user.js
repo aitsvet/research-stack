@@ -6,11 +6,11 @@
 
 // === zotero-mcp-claude-code plugin ===
 
-// MCP HTTP server: bind on all interfaces (host networking means container
-// loopback === host loopback, but allowRemote=true makes the plugin bind to
-// 0.0.0.0, which is required when running under network_mode: host so the host
-// itself can reach it). Auth is required to compensate.
-user_pref("extensions.zotero.zotero-mcp-plugin.mcp.server.allowRemote", true);
+// MCP HTTP server: loopback only. Under network_mode: host the container
+// loopback IS the host loopback, so binding 127.0.0.1 is enough for the host
+// to reach :23120 — allowRemote=true (0.0.0.0) is never needed and violates
+// the host rule that only sshd and the system nginx face the network.
+user_pref("extensions.zotero.zotero-mcp-plugin.mcp.server.allowRemote", false);
 user_pref("extensions.zotero.zotero-mcp-plugin.mcp.server.requireAuth", true);
 
 // All write scopes enabled. Remove or flip to false to restrict the agent.
