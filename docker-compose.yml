@@ -173,6 +173,22 @@ services:
       - ${CORPUS:-../literature}:/corpus
     working_dir: /corpus
 
+  ############################
+  # plantuml — diagram sources (.puml) -> PNG/SVG
+  ############################
+  # One-shot renderer, not a daemon. Keeps Java and Graphviz off the host.
+  #   docker compose --profile tools run --rm plantuml -tpng '<file>.puml'
+  # WORK points at the tree holding the diagrams (default: ../diagrams).
+  # Output lands beside the source, owned by the host user.
+  plantuml:
+    build: ./docker/plantuml
+    image: research-stack/plantuml:latest
+    profiles: ["tools"]
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    volumes:
+      - ${WORK:-../diagrams}:/work
+    working_dir: /work
+
 volumes:
   gptproxy_open-webui:
     external: true
