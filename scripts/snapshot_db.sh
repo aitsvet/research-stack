@@ -17,8 +17,10 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ZDIR="$ROOT/config/Zotero"
 SNAP="$ZDIR/.snapshot"
 DBS=(zotero.sqlite zotero-mcp-vectors.sqlite)
+PYTHON="$ROOT/.venv/bin/python"
 
 [ -f "$ZDIR/zotero.sqlite" ] || { echo "no $ZDIR/zotero.sqlite" >&2; exit 1; }
+[ -x "$PYTHON" ] || { echo "missing $PYTHON" >&2; exit 1; }
 mkdir -p "$SNAP"
 rm -f "$SNAP"/*
 
@@ -46,7 +48,7 @@ fi
 # Journal rollback (first open) + integrity_check; after the rollback the
 # journal is gone and the copy is self-contained. Prints "items: N", which
 # sync_library.sh compares against the replica after the swap.
-python3 - "$SNAP" <<'PY'
+"$PYTHON" - "$SNAP" <<'PY'
 import os, sqlite3, sys
 snap = sys.argv[1]
 for db in sorted(os.listdir(snap)):

@@ -41,7 +41,8 @@ Container uses **`network_mode: host`** — every port the container opens is di
 | `scripts/launch_chromium.sh` | yes | Idempotent launcher for the in-container Chromium with CDP |
 | `scripts/apply_config.sh` | yes | Copies Zotero `user.js` into the active profile |
 | `scripts/sync_library.sh` | yes | Two-way library sync between peers — run on the origin (section below) |
-| `scripts/snapshot_db.sh` / `place_snapshot.sh` / `merge_replica.py` | yes | Sync building blocks: crash-consistent DB snapshot, DB swap on the replica, MCP merge-replay |
+| `scripts/zotero-sync/SKILL.md` | yes | Required operating skill for peer sync, key recovery, manifests, and literature reconciliation |
+| `scripts/snapshot_db.sh` / `place_snapshot.sh` / `merge_replica.py` | yes | Sync building blocks: crash-consistent DB snapshot, verified DB swap, three-way fast-forward classifier |
 | `scripts/library_manifest.sh` | yes | Whole-library manifest (collections + items) as markdown — post-sync verification (section below) |
 | `scripts/` (the rest) | yes | Research discovery/acquisition/extraction pipeline — catalogued in `AGENTS.md` |
 | `docker/docconv/` | yes | Image for the `docconv` service: LibreOffice headless for office-document → Markdown conversion, kept off the host. Batch, not a daemon — `docker compose --profile tools run --rm docconv <dir>`; point `CORPUS` at the tree to convert (default `../literature`). |
@@ -148,13 +149,12 @@ command = "npx"
 args    = ["-y", "chrome-devtools-mcp@latest", "--browser-url", "http://127.0.0.1:9222"]
 
 [mcp_servers.zotero]
-# Codex currently has no HTTP-transport MCP support; bridge via a stdio proxy.
-command = "npx"
-args    = ["-y", "mcp-remote", "http://127.0.0.1:23120/mcp",
-           "--header", "Authorization: Bearer ${ZOTERO_MCP_TOKEN}"]
+command = "bash"
+args = ["-lc", "exec \"<path-to-launcher>\" zotero"]
 ```
 
-Set `ZOTERO_MCP_TOKEN` in your shell before launching codex.
+The launcher entry point loads `ZOTERO_MCP_TOKEN` from this repo's `.env` and bypasses proxies for localhost.
+Its pinned bridge requires Node >=20.18.1; use a supported Node LTS release.
 
 ## Daily operation
 
@@ -169,33 +169,43 @@ Set `ZOTERO_MCP_TOKEN` in your shell before launching codex.
 
 ## Library sync between peers
 
+Read `scripts/zotero-sync/SKILL.md` before operating or recovering the sync;
+this section records the architecture and configuration rationale.
+
 Any number of hosts can run this stack, each with its own AI front-end
 (Claude Code, OpenCode, Open WebUI, …) — the sync neither knows nor cares
-which. Like git with a hub: one host is the **origin** (the merge point),
+which. Like fast-forward-only git with a hub: one host is the **origin**,
 every other is a **replica**; peers exchange the Zotero library itself over
 ssh+rsync, no zotero.org account involved.
 
-All peers write. rsync cannot merge two sqlite files, so merging happens on
-the origin through its live Zotero. `scripts/sync_library.sh` (run ON the
-origin, once per replica) does the whole cycle:
+All peers may write, but a Zotero object key is durable identity: item, note,
+attachment and collection keys must never be regenerated during a sync.
+`scripts/sync_library.sh` therefore keeps the last common snapshot in
+`.sync/base/zotero.sqlite` and permits whole-snapshot fast-forwards only. Run
+it ON the origin, once per replica:
 
 1. stops zotero on the replica (its writes pause safely; the replica's MCP is
    down for the duration) and fetches its DB; if the origin has no DB yet, it
    transfers the replica's library wholesale and stops there (first fill);
 2. takes a crash-consistent snapshot of its own DB — `snapshot_db.sh`,
    sub-second `docker pause` (why not the sqlite backup API — see its header);
-3. `merge_replica.py` diffs and replays the replica's edits into the origin's
-   live Zotero via MCP; what is replayed and who wins conflicts — see its
-   header; an empty diff skips the merge;
-4. pushes the merged snapshot back with `rsync -a --delete` (storage, styles,
+3. `merge_replica.py` compares origin and replica against the last common
+   snapshot. If only one peer changed—or one peer demonstrably contains every
+   change made by the other—that exact snapshot wins. Independent changes stop
+   before mutation with a report in `.sync/plan.json`;
+4. if the replica wins, pulls its storage and installs its exact DB on the
+   origin; then pushes the winning snapshot back with compressed,
+   partial-transfer-preserving `rsync --delete` (storage, styles,
    translators + the `config/.zotero/` profile carrying the MCP plugin);
    `place_snapshot.sh` on the replica swaps the DB, checks integrity and item
    count, and the replica's container starts again — or is left stopped if
    the check fails.
 
-Losing note versions and unsupported attachments are rescued into
-`.sync/rescue-notes/` and `.sync/rescue-storage/` on the origin. Replica
-rollback: `cp config/Zotero/zotero.sqlite.prev config/Zotero/zotero.sqlite`.
+No objects are replayed through MCP and no key map is created. A conflict is
+resolved outside this script (manual choice or Zotero native sync), followed
+by another run once the peers agree. `place_snapshot.sh` retains the replaced
+live DB as `zotero.sqlite.prev`; the origin also retains its pre-fast-forward
+snapshot in `.sync/pre-fast-forward/origin.sqlite`.
 
 ```bash
 SYNC_REPLICA=user@peer ./scripts/sync_library.sh --dry-run   # plan + volumes
@@ -203,7 +213,15 @@ SYNC_REPLICA=user@peer ./scripts/sync_library.sh
 ```
 
 Access is the ordinary ssh key the origin already uses to reach the peer
-(override with `SYNC_SSH_KEY`). Several replicas — one run per peer;
+(override with `SYNC_SSH_KEY`; prefer a jump host with `SYNC_SSH_JUMP`). If the
+preferred jump is unavailable, the default fallback retries through the peer's
+ordinary `~/.ssh/config` route; set `SYNC_SSH_FALLBACK_JUMP` to a second jump,
+or to an empty value to disable fallback. These non-secret route preferences
+may live in the gitignored `.env` or `.sync/config.env`. The sync selects a route once, keeps one SSH
+connection alive across its rsync calls, retries the initial connection, and
+resumes an interrupted SQLite download through rsync's checksum-verified delta
+algorithm; override the default 15-minute control lifetime with
+`SYNC_SSH_PERSIST`. Several replicas — one run per peer;
 overlapping runs are serialized by flock. Cron on the origin, one line per
 peer (daily at 04:17; the replica's zotero is down during its window):
 
@@ -211,9 +229,10 @@ peer (daily at 04:17; the replica's zotero is down during its window):
 17 4 * * * SYNC_REPLICA=user@peer $HOME/research-stack/scripts/sync_library.sh >>$HOME/research-stack/sync.log 2>&1
 ```
 
-The first fill transfers the whole storage; later runs are deltas. Bring a
+The first fill transfers the whole storage and establishes the three-way base;
+later runs are deltas. Bring a
 new peer's zotero container up only AFTER its first fill — a freshly created
-empty DB against a full peer aborts the merge (the script explains what to
+empty DB against a full peer aborts the sync (the script explains what to
 remove).
 
 Verifying a sync: `scripts/library_manifest.sh [out.md]` (any peer; default

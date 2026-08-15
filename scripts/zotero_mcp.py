@@ -90,21 +90,30 @@ def import_file(mcp, parent, url, title, content_type=None, if_exists="add"):
 def import_local_files(mcp, jobs, public_ip, port=28765,
                        content_type="application/pdf", if_exists="skip"):
     """Attach LOCAL files to Zotero items. import_attachment_url rejects
-    loopback/RFC-1918, so this serves a throwaway copy of each file on the
-    host's PUBLIC ip for the duration of the import, then tears the server down
-    (the documented work-around, made callable).
+    literal loopback/RFC-1918 hosts, so this serves a throwaway copy of each
+    file for the duration of the import, then tears the server down. A private
+    IPv4 address is expressed through nip.io's DNS alias; it still resolves
+    directly to the same host and no file is uploaded to that service.
 
         jobs : list of (local_path, parentItemKey, title)
-        public_ip : a routable host IP reachable from the Zotero process
-                    (`hostname -I`; NOT 127.0.0.1 / 10. / 172.16. / 192.168.)
+        public_ip : a host IPv4 address reachable from the Zotero process
+                    (`hostname -I`); private addresses are supported
     Returns [(parentItemKey, ok_bool, text)]. Serves a temp dir only (never the
-    repo root); uses system python3 so it works regardless of venv.
+    repo root) and uses the current Python interpreter.
 
     Staged names are forced to ASCII: the importer validates the URL string and
     rejects non-ASCII paths as "Invalid attachment URL", so a Cyrillic filename
     fails here even though everything else is correct. The original name is
     irrelevant downstream — Zotero titles the attachment from `title`."""
+    import ipaddress as _ipaddress
+    import sys as _sys
     import tempfile, shutil, subprocess, time as _t, os as _os, re as _re
+    url_host = public_ip
+    try:
+        if _ipaddress.ip_address(public_ip).is_private:
+            url_host = f"{public_ip}.nip.io"
+    except ValueError:
+        pass
     staging = tempfile.mkdtemp(prefix="zimp_")
     names = []
     for i, (path, _key, _title) in enumerate(jobs):
@@ -113,13 +122,13 @@ def import_local_files(mcp, jobs, public_ip, port=28765,
                        _os.path.splitext(_os.path.basename(path))[0])
         nm = "f%d_%s%s" % (i, stem.strip("_")[:40] or "file", ext)
         shutil.copyfile(path, _os.path.join(staging, nm)); names.append(nm)
-    srv = subprocess.Popen(["python3", "-m", "http.server", str(port),
+    srv = subprocess.Popen([_sys.executable, "-m", "http.server", str(port),
                             "--bind", "0.0.0.0", "--directory", staging],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     _t.sleep(2); out = []
     try:
         for (path, key, title), nm in zip(jobs, names):
-            url = "http://%s:%d/%s" % (public_ip, port, nm)
+            url = "http://%s:%d/%s" % (url_host, port, nm)
             try:
                 r = import_file(mcp, key, url, title, content_type, if_exists=if_exists)
                 t = result_text(r); ok = ('"success": true' in t) or ("already" in t.lower())

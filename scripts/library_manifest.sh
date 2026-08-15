@@ -15,7 +15,10 @@ fetch_all() { # $1 = endpoint path, $2 = output jsonl
   local ep="$1" out="$2" start=0 n
   : > "$out"
   while :; do
-    resp=$(curl -sf "$BASE$ep?format=json&limit=100&start=$start")
+    # The local Zotero API must not be routed through an inherited HTTP proxy.
+    # Non-local ZOTERO_API overrides still keep their ordinary proxy behavior.
+    resp=$(curl -sf --noproxy localhost,127.0.0.1,::1 \
+      "$BASE$ep?format=json&limit=100&start=$start")
     n=$(jq 'length' <<<"$resp")
     jq -c '.[]' <<<"$resp" >> "$out"
     start=$((start + 100))
@@ -29,17 +32,46 @@ fetch_all "/items/trash" "$TMP/trash.jsonl"
 
 echo "collections=$(wc -l < "$TMP/cols.jsonl") items=$(wc -l < "$TMP/items.jsonl") trash=$(wc -l < "$TMP/trash.jsonl")" >&2
 
+# Keep only fields the renderer uses. In particular, do this before --slurpfile:
+# copying multi-megabyte note/abstract bodies through every collection filter
+# made a medium library take many minutes even though the manifest prints only
+# the first 80 characters of a standalone note.
+compact_items() {
+  local src="$1"
+  jq -c '
+    def clean: gsub("[\r\n\t]+"; " ") | gsub(" +"; " ") | sub(" +$"; "");
+    {
+      key: .key,
+      meta: {
+        creatorSummary: (.meta.creatorSummary // ""),
+        parsedDate: (.meta.parsedDate // "")
+      },
+      data: {
+        itemType: .data.itemType,
+        parentItem: (.data.parentItem // null),
+        collections: (.data.collections // [])
+      },
+      manifestTitle: (
+        (.data.title // .data.caseName // .data.nameOfAct //
+          (if .data.itemType == "note"
+           then ((.data.note // "")[0:4096]
+                 | gsub("<[^>]*>"; " ") | clean | .[0:80])
+           else null end) // "(untitled)") | clean
+      )
+    }
+  ' "$src" > "$src.compact"
+  mv "$src.compact" "$src"
+}
+compact_items "$TMP/items.jsonl"
+compact_items "$TMP/trash.jsonl"
+
 jq -n -r \
   --slurpfile cols "$TMP/cols.jsonl" \
   --slurpfile items "$TMP/items.jsonl" \
   --slurpfile trash "$TMP/trash.jsonl" \
   --arg date "$(date -u +%Y-%m-%d)" \
   --arg base "$BASE" '
-  def clean: gsub("[\r\n\t]+"; " ") | gsub(" +"; " ");
-  def title($i):
-    ( $i.data.title // $i.data.caseName // $i.data.nameOfAct //
-      (if $i.data.itemType == "note" then ($i.data.note // "" | gsub("<[^>]*>"; " ") | clean | .[0:80]) else null end) //
-      "(untitled)" ) | clean;
+  def title($i): $i.manifestTitle;
 
   ($cols | map({(.key): {name: .data.name, parent: (.data.parentCollection // false)}}) | add) as $cmap |
   def cpath($k): if $cmap[$k].parent == false then $cmap[$k].name
@@ -74,6 +106,7 @@ jq -n -r \
 
   ($cols | map(.key) | map({key: ., path: cpath(.)}) | sort_by(.path | ascii_downcase)) as $csorted |
 
+  (
   "# Zotero library manifest\n\n" +
   "Generated \($date) from \($base).\n" +
   "Purpose: diff against another peer'\''s manifest after a library sync.\n" +
@@ -102,4 +135,5 @@ jq -n -r \
     "## Trash — \($trash | length) items\n\n" +
     ($trash | map("- `\(.key)` \(.data.itemType) — " + title(.)) | join("\n")) + "\n"
    else "" end)
+  ) | rtrimstr("\n")
 ' > "$OUT"

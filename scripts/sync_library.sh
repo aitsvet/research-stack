@@ -1,76 +1,144 @@
 #!/usr/bin/env bash
-# Two-way Zotero library sync between peers — like git with a hub: one host is
-# the ORIGIN (the merge point; run this script there, once per replica), any
-# number of other hosts are replicas. Independent of whatever AI front-end
-# (Claude Code, OpenCode, Open WebUI, …) runs on any of the peers.
-# Design and operations: SETUP.md, "Library sync between peers".
-# Merge semantics: merge_replica.py header.
+# Identity-preserving Zotero sync between peers — like fast-forward-only git
+# with a hub. Run on the ORIGIN, once per replica. The Zotero object key is a
+# durable identity and is never reassigned; see merge_replica.py.
 #
 #   SYNC_REPLICA=user@replica ./scripts/sync_library.sh [--dry-run]
 #
 # Variables:
-#   SYNC_REPLICA       ssh address of the replica (user@host). Empty = local
-#                      test: the replica is the local path SYNC_REPLICA_ROOT.
-#   SYNC_REPLICA_ROOT  path of research-stack on the replica (default
-#                      "research-stack", relative to $HOME there).
-#   SYNC_SSH_KEY       dedicated ssh key (default: regular ssh identity).
+#   SYNC_REPLICA       ssh address of the replica. Empty = local-path test.
+#   SYNC_REPLICA_ROOT  research-stack path on replica (default: research-stack).
+#   SYNC_SSH_KEY       optional identity file.
+#   SYNC_SSH_JUMP      preferred jump host.
+#   SYNC_SSH_FALLBACK_JUMP  fallback jump; "config" (default) means use the
+#                      replica's ordinary ~/.ssh/config route without -J.
+#   SYNC_SSH_PERSIST   shared SSH connection lifetime (default: 15m).
 #
-# --dry-run: merge plan + rsync volumes; containers and DBs are untouched
-# (except a sub-second pause of the replica's zotero while its DB is copied).
+# --dry-run copies verified DB snapshots into .sync for comparison, but only
+# pauses replica Zotero briefly and performs no library/profile/container swap.
 
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+if [ -f "$ROOT/.env" ]; then set -a; . "$ROOT/.env"; set +a; fi
+if [ -f "$ROOT/.sync/config.env" ]; then
+  set -a; . "$ROOT/.sync/config.env"; set +a
+fi
+
 REPLICA="${SYNC_REPLICA-}"
 RROOT="${SYNC_REPLICA_ROOT:-research-stack}"
 SYNC="$ROOT/.sync"
+BASE="$SYNC/base/zotero.sqlite"
 KEY="${SYNC_SSH_KEY-}"
+JUMP="${SYNC_SSH_JUMP-}"
+FALLBACK_JUMP="${SYNC_SSH_FALLBACK_JUMP-config}"
+PERSIST="${SYNC_SSH_PERSIST:-15m}"
+PYTHON="$ROOT/.venv/bin/python"
 
+[ -x "$PYTHON" ] || { echo "missing $PYTHON — create the repo venv before syncing" >&2; exit 1; }
 DRY=()
-if [ "${1-}" = "--dry-run" ]; then DRY=(--dry-run); fi
-
-SSH=(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new)
-if [ -n "$KEY" ] && [ -f "$KEY" ]; then SSH+=(-i "$KEY"); fi
-export RSYNC_RSH="${SSH[*]}"
-
-rsh() { # run a command on the replica (or locally in test mode)
-  if [ -n "$REPLICA" ]; then "${SSH[@]}" "$REPLICA" "$@"; else bash -c "$@"; fi
-}
-rpath() { # replica path prefix for rsync
-  if [ -n "$REPLICA" ]; then echo "$REPLICA:$RROOT"; else echo "$RROOT"; fi
-}
+if [ "${1-}" = --dry-run ]; then
+  DRY=(--dry-run)
+elif [ -n "${1-}" ]; then
+  echo "usage: $0 [--dry-run]" >&2
+  exit 2
+fi
 
 mkdir -p "$SYNC"
 exec 9>"$SYNC/.lock"
 if ! flock -n 9; then echo "another sync is already running" >&2; exit 1; fi
-rm -f "$SYNC/snap1.txt" "$SYNC/snap2.txt"
+rm -f "$SYNC/snap1.txt"
 
-if [ -n "$REPLICA" ] && ! rsh "true" 2>/dev/null; then
-  echo "replica $REPLICA unreachable over ssh" >&2
-  exit 1
+SSH_BASE=(ssh
+  -o BatchMode=yes
+  -o StrictHostKeyChecking=accept-new
+  -o ConnectTimeout=30
+  -o ConnectionAttempts=3
+  -o ServerAliveInterval=10
+  -o ServerAliveCountMax=3
+  -o ControlMaster=auto
+  -o ControlPersist="$PERSIST"
+  -o ControlPath="$SYNC/ssh-%C"
+)
+if [ -n "$KEY" ] && [ -f "$KEY" ]; then SSH_BASE+=(-i "$KEY"); fi
+
+set_ssh_route() {
+  SSH=("${SSH_BASE[@]}")
+  if [ -n "$1" ] && [ "$1" != config ]; then SSH+=(-J "$1"); fi
+}
+
+if [ -n "$REPLICA" ]; then
+  routes=()
+  if [ -n "$JUMP" ]; then
+    routes+=("$JUMP")
+    if [ -n "$FALLBACK_JUMP" ] && [ "$FALLBACK_JUMP" != "$JUMP" ]; then
+      routes+=("$FALLBACK_JUMP")
+    fi
+  else
+    routes+=(config)
+  fi
+  route_ok=""
+  for route in "${routes[@]}"; do
+    set_ssh_route "$route"
+    if "${SSH[@]}" "$REPLICA" true 2>/dev/null; then
+      route_ok=1
+      if [ "$route" != "${routes[0]}" ]; then
+        echo "preferred SSH jump unavailable; using fallback route" >&2
+      fi
+      break
+    fi
+  done
+  [ -n "$route_ok" ] || { echo "replica $REPLICA unreachable over ssh" >&2; exit 1; }
+else
+  set_ssh_route config
 fi
+export RSYNC_RSH="${SSH[*]}"
 
-if [ -f "$ROOT/.env" ]; then set -a; . "$ROOT/.env"; set +a; fi
+rsh() {
+  if [ -n "$REPLICA" ]; then "${SSH[@]}" "$REPLICA" "$@"; else bash -c "$@"; fi
+}
+rpath() {
+  if [ -n "$REPLICA" ]; then echo "$REPLICA:$RROOT"; else echo "$RROOT"; fi
+}
 
-# --- 1. replica container and its DB ---------------------------------------
+# Only the exact zotero container is paused/stopped. Compose siblings are never
+# created or started by this workflow.
 was_running=""
 if rsh "[ -f '$RROOT/docker-compose.yml' ] && [ -n \"\$(docker ps -q -f name='^zotero\$' 2>/dev/null)\" ]" 2>/dev/null; then
   was_running=1
 fi
 phase=fetch
 dry_paused=""
-restore() { # restart the replica container if we stopped it and its DB is sane
+local_was=""
+local_phase=""
+
+restore_replica() {
   if [ -n "$dry_paused" ]; then
     rsh "docker unpause zotero >/dev/null" || true
   elif [ -n "$was_running" ] && [ ${#DRY[@]} -eq 0 ]; then
     if [ "$phase" = place ]; then
-      echo "!! post-swap DB check failed — replica container LEFT STOPPED" >&2
+      echo "!! post-swap DB check failed — replica zotero LEFT STOPPED" >&2
     else
       rsh "docker start zotero >/dev/null" || true
     fi
   fi
 }
-trap restore EXIT
+restore_local() {
+  if [ -n "$local_was" ]; then
+    if [ "$local_phase" = place ]; then
+      echo "!! local post-swap DB check failed — local zotero LEFT STOPPED" >&2
+    else
+      docker start zotero >/dev/null || true
+    fi
+  fi
+}
+cleanup() {
+  restore_local
+  restore_replica
+  # Leave the multiplexed master alive for ControlPersist so a follow-up
+  # verification or recovery command reuses the authenticated jump route.
+}
+trap cleanup EXIT
 
 if [ -n "$was_running" ]; then
   if [ ${#DRY[@]} -gt 0 ]; then
@@ -84,12 +152,14 @@ if [ -n "$was_running" ]; then
 fi
 
 have_replica_db=""
-rm -rf "$SYNC/replica"; mkdir -p "$SYNC/replica"
-if rsync -a "$(rpath)/config/Zotero/zotero.sqlite" "$SYNC/replica/" 2>/dev/null; then
-  rsync -a "$(rpath)/config/Zotero/zotero.sqlite-journal" "$SYNC/replica/" 2>/dev/null || true
+mkdir -p "$SYNC/replica"
+rm -f "$SYNC/replica/zotero.sqlite-journal"
+if rsync -azc --partial "$(rpath)/config/Zotero/zotero.sqlite" "$SYNC/replica/"; then
+  rsync -azc --partial "$(rpath)/config/Zotero/zotero.sqlite-journal" \
+    "$SYNC/replica/" 2>/dev/null || true
   have_replica_db=1
 else
-  echo "==> replica has no DB yet — nothing to merge"
+  echo "==> replica has no DB yet"
 fi
 
 if [ -n "$dry_paused" ]; then
@@ -97,113 +167,128 @@ if [ -n "$dry_paused" ]; then
   dry_paused=""
 fi
 
-# --- 1b. origin has no DB yet → first fill from the replica -----------------
+# First fill is an exact replica copy and establishes the common ancestor.
 if [ ! -f "$ROOT/config/Zotero/zotero.sqlite" ]; then
-  if [ -z "$have_replica_db" ]; then
-    echo "no DB on either peer — nothing to sync" >&2
-    exit 1
-  fi
+  [ -n "$have_replica_db" ] || { echo "no DB on either peer" >&2; exit 1; }
   if [ ${#DRY[@]} -gt 0 ]; then
-    echo "==> dry-run: origin is empty — a real run would first-fill it from the replica"
+    echo "==> dry-run: origin is empty — a real run would first-fill it"
     exit 0
   fi
-  echo "==> first fill: transferring the library from the replica (its container is stopped, DB is whole)"
-  local_was=""
-  if [ -f "$ROOT/docker-compose.yml" ] && [ -n "$(docker ps -q -f name='^zotero$' 2>/dev/null || true)" ]; then
-    docker stop zotero >/dev/null; local_was=1
+  echo "==> first fill: transferring the stopped replica library"
+  if [ -n "$(docker ps -q -f name='^zotero$' 2>/dev/null || true)" ]; then
+    docker stop zotero >/dev/null
+    local_was=1
   fi
   mkdir -p "$ROOT/config"
-  rsync -a --delete --info=stats1 --exclude '*.bak' --exclude '*.prev' \
+  rsync -az --partial --delete --info=stats1 --exclude '*.bak' --exclude '*.prev' \
     "$(rpath)/config/Zotero/" "$ROOT/config/Zotero/"
-  rsync -a --delete --info=stats1 "$(rpath)/config/.zotero/" "$ROOT/config/.zotero/" 2>/dev/null || true
-  python3 - "$ROOT/config/Zotero/zotero.sqlite" <<'PY'
+  rsync -az --partial --delete --info=stats1 \
+    "$(rpath)/config/.zotero/" "$ROOT/config/.zotero/" 2>/dev/null || true
+  "$PYTHON" - "$ROOT/config/Zotero/zotero.sqlite" <<'PY'
 import sqlite3, sys
-con = sqlite3.connect(f'file:{sys.argv[1]}?mode=ro', uri=True)
+con = sqlite3.connect(sys.argv[1])
 ok = con.execute('PRAGMA integrity_check').fetchone()[0]
 n = con.execute('SELECT COUNT(*) FROM items').fetchone()[0]
 if ok != 'ok': sys.exit(f'integrity_check: {ok}')
 print(f'origin filled: integrity ok, items: {n}')
 PY
-  if [ -n "$local_was" ]; then docker start zotero >/dev/null; fi
-  echo "==> done (subsequent runs do the normal two-way cycle)"
+  mkdir -p "$(dirname "$BASE")"
+  cp -a "$ROOT/config/Zotero/zotero.sqlite" "$BASE"
+  if [ -n "$local_was" ]; then docker start zotero >/dev/null; local_was=""; fi
+  echo "==> done"
   exit 0
 fi
 
-# --- 2. origin snapshot + merge plan ----------------------------------------
 echo "==> origin snapshot"
-./scripts/snapshot_db.sh > "$SYNC/snap1.txt"; cat "$SYNC/snap1.txt"
+./scripts/snapshot_db.sh > "$SYNC/snap1.txt"
+cat "$SYNC/snap1.txt"
 
-if [ -n "$have_replica_db" ]; then
-  python3 - "$SYNC/replica/zotero.sqlite" <<'PY'   # journal rollback + copy check
+if [ -z "$have_replica_db" ]; then
+  echo "replica has no database; refusing to overwrite it implicitly" >&2
+  exit 1
+fi
+
+# Roll back a fetched hot journal, then verify before comparison.
+"$PYTHON" - "$SYNC/replica/zotero.sqlite" <<'PY'
 import sqlite3, sys
 con = sqlite3.connect(sys.argv[1])
 ok = con.execute('PRAGMA integrity_check').fetchone()[0]
 if ok != 'ok': sys.exit(f'fetched replica DB is corrupt: {ok}')
 PY
-  echo "==> merge plan (replica edits)"
-  python3 ./scripts/merge_replica.py plan \
-    --origin "$ROOT/config/Zotero/.snapshot/zotero.sqlite" \
-    --replica "$SYNC/replica/zotero.sqlite" --out "$SYNC/plan.json"
 
-  # a freshly created empty origin DB against a full replica is a deployment
-  # ordering mistake, not "thousands of new items on the replica"
-  if ! python3 -c "import json,sys; s=json.load(open('$SYNC/plan.json'))['stats']; sys.exit(1 if s['origin_items']<10 and s['replica_items']>100 else 0)"; then
-    echo "!! origin DB is nearly empty while the replica is full: the container likely created a fresh DB." >&2
-    echo "   Stop zotero, remove config/Zotero/zotero.sqlite and re-run — the first fill will kick in." >&2
-    exit 1
-  fi
+echo "==> three-way fast-forward plan"
+base_arg=()
+if [ -f "$BASE" ]; then base_arg=(--base "$BASE"); fi
+"$PYTHON" ./scripts/merge_replica.py plan \
+  --origin "$ROOT/config/Zotero/.snapshot/zotero.sqlite" \
+  --replica "$SYNC/replica/zotero.sqlite" "${base_arg[@]}" \
+  --out "$SYNC/plan.json"
 
-  # files of the replica's new attachments (to import) + rescued ones
-  for kind in storage_keys rescue_keys; do
-    if [ "$kind" = rescue_keys ]; then dest="$SYNC/rescue-storage"; else dest="$SYNC/storage"; fi
-    keys="$(python3 -c "import json;print(' '.join(json.load(open('$SYNC/plan.json'))['$kind']))")"
-    if [ -n "$keys" ]; then
-      mkdir -p "$dest"
-      for k in $keys; do
-        rsync -a "$(rpath)/config/Zotero/storage/$k" "$dest/" || echo "!! failed to fetch storage/$k" >&2
-      done
-    fi
-  done
-
-  # --- 3. replay replica edits into the origin's live Zotero ---------------
-  ops="$(python3 -c "import json; s=json.load(open('$SYNC/plan.json'))['stats']; print(sum(s[k] for k in ('new_items','new_notes','note_updates','tag_additions','new_collections','memberships','attachments','trash')))")"
-  if [ ${#DRY[@]} -eq 0 ] && [ "$ops" -gt 0 ]; then
-    phase=apply
-    echo "==> applying replica edits on the origin (MCP)"
-    python3 ./scripts/merge_replica.py apply "$SYNC/plan.json" \
-      --replica-storage "$SYNC/storage" \
-      --serve-ip "$(hostname -I | awk '{print $1}')" \
-      --rescue "$SYNC/rescue-notes"
-    echo "==> snapshot of the merged origin"
-    ./scripts/snapshot_db.sh > "$SYNC/snap2.txt"; cat "$SYNC/snap2.txt"
-  elif [ ${#DRY[@]} -eq 0 ]; then
-    echo "==> no replica edits — merge skipped"
-  fi
+if ! "$PYTHON" -c "import json,sys; s=json.load(open('$SYNC/plan.json'))['stats']; sys.exit(1 if s['origin_items']<10 and s['replica_items']>100 else 0)"; then
+  echo "!! origin is nearly empty while replica is full; refusing deployment-order loss" >&2
+  exit 1
 fi
-want_items="$(sed -n 's/.*items: \([0-9]\{1,\}\).*/\1/p' "$SYNC"/snap2.txt "$SYNC"/snap1.txt 2>/dev/null | head -1 || true)"
 
-# --- 4. push to the replica and swap its DB ---------------------------------
+mode="$("$PYTHON" -c "import json; print(json.load(open('$SYNC/plan.json'))['mode'])")"
+reason="$("$PYTHON" -c "import json; print(json.load(open('$SYNC/plan.json'))['stats']['reason'])")"
+echo "==> $mode: $reason"
+if [ "$mode" = conflict ]; then
+  echo "!! stopped before mutation; inspect $SYNC/plan.json" >&2
+  exit 2
+fi
+
+if [ "$mode" = replica_fast_forward ]; then
+  echo "==> replica is authoritative; pulling storage without deleting local cache"
+  mkdir -p "$ROOT/config/Zotero/storage"
+  rsync -az --partial "${DRY[@]}" --info=stats1 \
+    "$(rpath)/config/Zotero/storage/" "$ROOT/config/Zotero/storage/"
+  if [ ${#DRY[@]} -gt 0 ]; then
+    echo "==> dry-run: replica snapshot would replace the unchanged origin; no push performed"
+    exit 0
+  fi
+
+  if [ -n "$(docker ps -q -f name='^zotero$' 2>/dev/null || true)" ]; then
+    docker stop zotero >/dev/null
+    local_was=1
+  fi
+  mkdir -p "$SYNC/pre-fast-forward" "$ROOT/config/Zotero/.snapshot"
+  cp -a "$ROOT/config/Zotero/.snapshot/zotero.sqlite" \
+    "$SYNC/pre-fast-forward/origin.sqlite"
+  rm -f "$ROOT/config/Zotero/.snapshot/zotero.sqlite"{,-journal,-wal,-shm}
+  cp -a "$SYNC/replica/zotero.sqlite" "$ROOT/config/Zotero/.snapshot/zotero.sqlite"
+  replica_items="$("$PYTHON" -c "import json; print(json.load(open('$SYNC/plan.json'))['stats']['replica_items'])")"
+  local_phase=place
+  ./scripts/place_snapshot.sh "$replica_items"
+  local_phase=done
+  if [ -n "$local_was" ]; then docker start zotero >/dev/null; local_was=""; fi
+  echo "==> origin fast-forwarded with replica keys unchanged"
+elif [ "$mode" = equal ]; then
+  echo "==> peers already equal"
+else
+  echo "==> origin contains the winning snapshot"
+fi
+
+want_items="$("$PYTHON" -c "import sqlite3; c=sqlite3.connect('file:$ROOT/config/Zotero/.snapshot/zotero.sqlite?mode=ro',uri=True); print(c.execute('select count(*) from items').fetchone()[0])")"
+
+# Push the winning data and snapshot, then atomically install the DB remotely.
 phase=push
-rsh "mkdir -p '$RROOT/config'"    # rsync only creates the last path element
-echo "==> rsync push: data (storage, styles, translators, DB snapshots)"
-# Live DBs are excluded ONLY at the root (the leading "/" anchors the pattern
-# to config/Zotero/): unanchored, rsync would also exclude
-# .snapshot/zotero.sqlite — the whole point of the transfer.
-rsync -a --delete "${DRY[@]}" --info=stats1 \
+rsh "mkdir -p '$RROOT/config'"
+echo "==> rsync push: data"
+rsync -az --partial --delete "${DRY[@]}" --info=stats1 \
   --exclude '/zotero.sqlite' --exclude '/zotero.sqlite-*' \
   --exclude '/zotero-mcp-vectors.sqlite' --exclude '/zotero-mcp-vectors.sqlite-*' \
   --exclude '*.bak' --exclude '*.prev' \
   "$ROOT/config/Zotero/" "$(rpath)/config/Zotero/"
 
-echo "==> rsync push: profile (prefs.js, extensions — MCP plugin and token inside)"
-rsync -a --delete "${DRY[@]}" --info=stats1 \
+echo "==> rsync push: profile"
+rsync -az --partial --delete "${DRY[@]}" --info=stats1 \
   --exclude '.parentlock' --exclude 'crashes/' --exclude 'datareporting/' \
   --exclude 'places.sqlite*' --exclude '*-wal' --exclude '*-shm' \
   --exclude 'Telemetry*' \
   "$ROOT/config/.zotero/" "$(rpath)/config/.zotero/"
 
 if [ ${#DRY[@]} -gt 0 ]; then
-  echo "==> dry-run: DB swap and replica container untouched"
+  echo "==> dry-run: DB swap and common base untouched"
   exit 0
 fi
 
@@ -211,6 +296,10 @@ echo "==> swapping the DB on the replica"
 phase=place
 rsh "'$RROOT/scripts/place_snapshot.sh' '$want_items'"
 phase=done
+
+# Advance the common ancestor only after both peers accepted the winner.
+mkdir -p "$(dirname "$BASE")"
+cp -a "$ROOT/config/Zotero/.snapshot/zotero.sqlite" "$BASE"
 
 if [ -n "$was_running" ]; then
   echo "==> starting zotero on the replica"
