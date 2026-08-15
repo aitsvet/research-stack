@@ -18,10 +18,12 @@ claude mcp add zotero http://127.0.0.1:23120/mcp -t http \
   --header "Authorization: Bearer $ZOTERO_MCP_TOKEN"
 ```
 
-Library sync between peers (one **origin** merges, any number of replicas;
+Library sync between peers (one **origin**, any number of replicas;
 independent of which AI front-end runs where): `scripts/sync_library.sh` on
-the origin — design and operations in `SETUP.md`. A replica's zotero container
-stops briefly during its sync window. To verify a sync, any peer can dump its
+the origin — read `scripts/zotero-sync/SKILL.md` before every sync or recovery;
+architecture is in `SETUP.md`. A replica's zotero container
+stops briefly during its sync window. Object keys are immutable: the sync uses
+whole-snapshot three-way fast-forwards and stops on independent changes. To verify a sync, any peer can dump its
 whole library (collections + items, keys, counts) as diff-friendly markdown:
 `scripts/library_manifest.sh [out.md]`.
 
@@ -55,7 +57,7 @@ When a paper isn't found by DOI on the obvious site, work outward:
 
 - **PDFs by URL** → use the MCP `import_attachment_url` tool. Pass `contentType: "application/pdf"` to skip the SingleFile snapshot path. Works for any HTTPS URL, including signed-token download URLs from logged-in browser sessions.
 - **Local text/markdown/HTML files** → the MCP rejects `file://`, `127.0.0.1`, and RFC-1918 addresses, and binding a temp HTTP server to the public interface needs firewall coordination. Use `./scripts/zotero_attach_text.sh <itemKey> <file> [title] [tag1,tag2,...]` instead — it streams the file straight into `add_note` over the local MCP HTTP socket, so the contents never enter the model's context. The note ends up as a child of `itemKey`, wrapped in `<pre>` so whitespace renders.
-- **Local PDFs (binary)** → `import_local_files(mcp, jobs, public_ip)` in `zotero_mcp.py` — wraps the public-IP serve-and-import work-around (import_attachment_url rejects loopback/RFC-1918): copies each to a throwaway dir, serves it on a routable host IP (`hostname -I`, **not** 10./172./192.168./127.) via system `python3 -m http.server`, imports by URL, tears down. `jobs` = `[(local_path, parentItemKey, title)]`.
+- **Local PDFs (binary)** → `import_local_files(mcp, jobs, host_ip)` in `zotero_mcp.py` — copies each to a throwaway dir, serves it only for the import, and tears down. Literal RFC1918 URLs are rejected by the plugin, so private IPv4 hosts use `<ip>.nip.io` as a DNS alias back to the same machine; no file is sent to nip.io. `jobs` = `[(local_path, parentItemKey, title)]`.
 - **Sanity-check downloads.** Zotero stores attachments at `config/Zotero/storage/<attachmentKey>/`. `file storage/<key>/*` quickly confirms whether you got a real PDF or a sign-in HTML page.
 
 ## Paper ↔ discovery folder convention
@@ -110,6 +112,8 @@ The pipeline is **two-pass on purpose**: pass 1 (`discover.py`) creates lightwei
 | `retry_unpaywall.py <log.json>` | For failed-acquire rows, walk Unpaywall's `oa_locations` until one returns a real PDF. |
 | `extract_texts.py <key>` | `pdftotext` (or `.zotero-ft-cache` fallback) every attached PDF in a collection → `.txt` per item. Preserves any pre-existing `<key>.txt` when no new content was produced (e.g. you ran an out-of-band `.docx` extractor first). |
 | `verify_refs.py <draft.md> [--per-line]` | Scan a draft for DOIs and compare each against Crossref: flag AUTHORS / TITLE / VENUE / NOTFOUND mismatches. Catches the "right DOI, wrong author" failure mode that LLM-generated bibliographies exhibit routinely. Author matching is diacritic-folded. Default mode = char-window around each DOI (DOIs in prose); pass `--per-line` for a formatted numbered reference list (one ref per line, each ending in its own DOI) — the window bleeds across neighbours otherwise. |
+| `check_citations.py <draft.md> [...]` | Gate numbered bibliographies mechanically: dangling/uncited numbers, gaps, duplicates, and numeric citation ranges. |
+| `resolve_dois.py wanted.json --out-dir DIR` | Resolve a title/author/year wanted list through Crossref with explicit overlap, author, and year gates; uncertain candidates stay unresolved. |
 | `flow_counts.py [--discovery <dir>] [<top_key> [<selected_key> [<needs_key>]]]` | Print PRISMA-style flow numbers (candidates → unique-selected → with-text → needs-manual-access) computed from `triage.json` + text manifest + Zotero collection sizes. Run before any paper that claims a "screened/included/depth-read" count. |
 | `zotero_attach_text.sh <item> <file>` | Stream a local text/markdown file into a Zotero child note without round-tripping through the model. |
 | `extract_texts.py md <pdf\|dir> [--out D]` | Pure-python PDF→Markdown via pymupdf4llm (no GPU/OCR), marker-compatible `{N}`+48-dash pagination. Reads the embedded text layer, so it's a clean reference for diffing/patching marker output (catches OCR homoglyphs marker invents). Needs `pip install -r requirements.txt` (pymupdf4llm). |
@@ -162,7 +166,7 @@ Once `extract_texts.py` has produced the per-item `.txt`, drive synthesis off th
 - **`fetch_pdf.sh <html-url> <dir> <base>`** renders via a *fresh, cookieless* container Chromium: beats UA-only blocks (PMC, institutional repos, MDPI, bronze-OA publisher pages) but **not** Cloudflare/interactive walls, and it **cannot render a direct `.pdf` URL in headless** — always aim it at the HTML article page (PMC most reliable).
 - **For Cloudflare / "Human Verification" walls use the user-visible Chromium** (playwright, persistent cookies). A "Just a moment" JS challenge often auto-clears on a second navigation a few seconds later (clearance cookie issued); managed / "Human Verification" walls need a person — open the tab(s) and ask the user to pass them.
 - **Extract without bloating context:** `browser_evaluate` with the **`filename` param** writes the result straight to a file. HTML full text → return `document.body.innerText` (or the article-body selector). A gated **same-origin** PDF (host already cleared) → in-page `await fetch(url,{credentials:'include'})` → blob → base64 data-URL → save → decode to `.pdf`. A truly subscription-only PDF still 403s after clearance — keep abstract-level text and cite conservatively.
-- Attach recovered local PDFs with `import_local_files` (public-IP serve), then re-run `extract_texts.py` to pick them up.
+- Attach recovered local PDFs with `import_local_files` (temporary same-host serve; private IPs use the nip.io alias described above), then re-run `extract_texts.py` to pick them up.
 
 ## Gotchas worth one more cycle
 
@@ -178,7 +182,7 @@ Once `extract_texts.py` has produced the per-item `.txt`, drive synthesis off th
 - **Refining a noisy topic is a two-pass norm.** Scan the top 10 hits; if noisy, grep itemKeys from the `get_collection_items` dump, `batch_trash` them (≤100 per call), then re-run `discover.py` with a tightened query. Cheaper than over-engineering the query upfront.
 - **AI-generated bibliographies hallucinate authors at correctly-formed DOIs.** A significant fraction of LLM-generated citations resolve to a real paper at the cited DOI but with completely different authors / venue / title. The DOI looks valid because it *is* valid — just for a different paper than the prose claims. Always run `verify_refs.py` before submission; treat any AUTHORS / TITLE / VENUE finding as blocking. For a formatted numbered reference list use `--per-line`, format each entry `Authors. Title // *Full Journal Name* doi:...` (ISO-690 ` // ` splits title from venue; use the unabbreviated journal name), and note that a shortened title (subtitle dropped) shows as a low-overlap TITLE flag — complete it from the Crossref title rather than assume a wrong-paper.
 - **PRISMA-flow numbers in a draft must match the artefacts.** Triage gross-pick counts and unique-included counts routinely diverge by the slice-overlap factor; a "deep-read" claim that's not recorded as a Zotero tag or a manifest field is almost certainly drift. Run `flow_counts.py --discovery discovery/<paper>` and copy its output verbatim into the paper's PRISMA section.
-- **`import_attachment_url` forbids loopback/private IPs** (SSRF guard: `127.0.0.1`, `10/172.16/192.168` all rejected) — a *local* file needs a public URL. `import_local_files` in `zotero_mcp.py` wraps the whole work-around (staging dir served on the public IP, import, teardown); never serve the repo root (it holds unpublished drafts). For *text* (`.md`/`.txt`), skip all this — `zotero_attach_text.sh` attaches it as a child note (no server).
+- **`import_attachment_url` forbids literal loopback/private-IP URLs** (SSRF guard: `127.0.0.1`, `10/172.16/192.168` all rejected). `import_local_files` in `zotero_mcp.py` wraps the work-around: it stages only the requested files, serves them on a host address reachable from Zotero, and expresses a private IPv4 address as `<ip>.nip.io` so the bytes still travel directly between the two hosts; never serve the repo root (it holds unpublished drafts). For *text* (`.md`/`.txt`), skip all this — `zotero_attach_text.sh` attaches it as a child note (no server).
 - **`ifExists` on `import_attachment_url`:** use `add` for many files → one parent (e.g. all standards onto one book record); use `skip` for one-file-per-item dedup. `skip` checks *any* same-content-type child, so it wrongly blocks the 2nd+ file on a multi-attachment parent.
 - **`add_note` size cap.** Notes over the cap return HTTP 413 (Content Too Large) — attach the `.txt` summary instead of a huge `.md`.
 - **`add_note` also 400s with `-32700 Parse error` on some inputs**, and it is *not* a size limit — 130 KB notes go through while a 5 KB one fails, and bisecting the same file gives a boundary that drifts with unrelated edits. Don't chase it: restructure the file (fold a small extract into a larger document that already attaches, or split into two notes) and move on. Budget one retry, not an investigation.

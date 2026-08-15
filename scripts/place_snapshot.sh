@@ -9,8 +9,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 Z="$ROOT/config/Zotero"
 want="${1-}"
+PYTHON="$ROOT/.venv/bin/python"
 
 [ -f "$Z/.snapshot/zotero.sqlite" ] || { echo "no $Z/.snapshot/zotero.sqlite" >&2; exit 1; }
+[ -x "$PYTHON" ] || { echo "missing $PYTHON" >&2; exit 1; }
 
 for db in zotero.sqlite zotero-mcp-vectors.sqlite; do
   if [ -f "$Z/.snapshot/$db" ]; then
@@ -21,7 +23,7 @@ for db in zotero.sqlite zotero-mcp-vectors.sqlite; do
   fi
 done
 
-python3 - "$Z/zotero.sqlite" "$want" <<'PY'
+"$PYTHON" - "$Z/zotero.sqlite" "$want" <<'PY'
 import sqlite3, sys
 path, want = sys.argv[1], sys.argv[2]
 try:
