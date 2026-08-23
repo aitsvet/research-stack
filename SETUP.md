@@ -44,7 +44,7 @@ Container uses **`network_mode: host`** — every port the container opens is di
 | `scripts/zotero-sync/SKILL.md` | yes | Required operating skill for peer sync, key recovery, manifests, and literature reconciliation |
 | `scripts/snapshot_db.sh` / `place_snapshot.sh` / `merge_replica.py` | yes | Sync building blocks: crash-consistent DB snapshot, verified DB swap, three-way fast-forward classifier |
 | `scripts/library_manifest.sh` | yes | Whole-library manifest (collections + items) as markdown — post-sync verification (section below) |
-| `scripts/` (the rest) | yes | Research discovery/acquisition/extraction pipeline — catalogued in `AGENTS.md` |
+| `scripts/` (the rest) | yes | Research discovery/acquisition/extraction pipeline — catalogued in `SCRIPTS.md` |
 | `docker/docconv/` | yes | Image for the `docconv` service: LibreOffice headless for office-document → Markdown conversion, kept off the host. Batch, not a daemon — `docker compose --profile tools run --rm docconv <dir>`; point `CORPUS` at the tree to convert (default `../literature`). |
 | `requirements.txt` | yes | Python deps for the pipeline scripts (`.venv/bin/pip install -r`) |
 | `open-webui/` / `opencode/` / `jupyter/` | yes | Optional appliances: AI front-ends (Open WebUI, OpenCode) and JupyterLab+MCP, each with its own README. `opencode/` and `jupyter/` bring their own compose; Open WebUI runs from the root compose instead — it moved there together with SearXNG, and the appliance copy that stayed behind only clashed over `container_name`. |
@@ -277,6 +277,25 @@ Standing rule for the host: **nothing binds `0.0.0.0` except sshd (`:22`) and th
 **The image regenerates labwc's rc.xml on every container start** from `/defaults/labwc.xml`, then applies a few env-driven sed tweaks (`NO_FULL=true` is set by default and strips the wildcard maximize rule). Editing `config/.config/labwc/rc.xml` directly is *not* persistent across container recreations. If you ever need to customize labwc here, bind-mount a replacement over `/defaults/labwc.xml:ro` in compose so the init `cp` picks up your version.
 
 **Live reload of labwc**: after editing rc.xml at runtime, `docker exec zotero pkill -HUP labwc` reloads the config. Already-mapped windows keep their existing rules — rules are reapplied only when a window is newly created, so kill the affected app and relaunch it for changes to bite.
+
+## Writing to Zotero over the MCP
+
+How to attach a file, and the quirks the MCP layer carries. Script reference is `SCRIPTS.md`.
+
+- **PDFs by URL** → use the MCP `import_attachment_url` tool. Pass `contentType: "application/pdf"` to skip the SingleFile snapshot path. Works for any HTTPS URL, including signed-token download URLs from logged-in browser sessions.
+- **Local text/markdown/HTML files** → the MCP rejects `file://`, `127.0.0.1`, and RFC-1918 addresses, and binding a temp HTTP server to the public interface needs firewall coordination. Use `./scripts/zotero_attach_text.sh <itemKey> <file> [title] [tag1,tag2,...]` instead — it streams the file straight into `add_note` over the local MCP HTTP socket, so the contents never enter the model's context. The note ends up as a child of `itemKey`, wrapped in `<pre>` so whitespace renders.
+- **Local PDFs (binary)** → `import_local_files(mcp, jobs, host_ip)` in `zotero_mcp.py` — copies each to a throwaway dir, serves it only for the import, and tears down. Literal RFC1918 URLs are rejected by the plugin, so private IPv4 hosts use `<ip>.nip.io` as a DNS alias back to the same machine; no file is sent to nip.io. `jobs` = `[(local_path, parentItemKey, title)]`.
+- **Sanity-check downloads.** Zotero stores attachments at `config/Zotero/storage/<attachmentKey>/`. `file storage/<key>/*` quickly confirms whether you got a real PDF or a sign-in HTML page.
+
+- **Zotero MCP body cap.** Requests over ~3700 bytes return `-32700 Parse error` (misleading). `discover.py`'s `cap_abstract` shrinks `abstractNote` until the payload fits, with `ensure_ascii=False` to keep non-Latin text compact — reuse it for any call that carries long text.
+- **`get_collection_items` overflows the tool-result token limit at >~30 items.** The MCP auto-saves the full JSON to a file and tells you the path — `grep -oE '"key": "[A-Z0-9]+"'` that file instead of asking the model to read it whole.
+- **`import_attachment_url` forbids literal loopback/private-IP URLs** (SSRF guard: `127.0.0.1`, `10/172.16/192.168` all rejected). `import_local_files` in `zotero_mcp.py` wraps the work-around: it stages only the requested files, serves them on a host address reachable from Zotero, and expresses a private IPv4 address as `<ip>.nip.io` so the bytes still travel directly between the two hosts; never serve the repo root (it holds unpublished drafts). For *text* (`.md`/`.txt`), skip all this — `zotero_attach_text.sh` attaches it as a child note (no server).
+- **`ifExists` on `import_attachment_url`:** use `add` for many files → one parent (e.g. all standards onto one book record); use `skip` for one-file-per-item dedup. `skip` checks *any* same-content-type child, so it wrongly blocks the 2nd+ file on a multi-attachment parent.
+- **`add_note` size cap.** Notes over the cap return HTTP 413 (Content Too Large) — attach the `.txt` summary instead of a huge `.md`.
+- **`add_note` also 400s with `-32700 Parse error` on some inputs**, and it is *not* a size limit — 130 KB notes go through while a 5 KB one fails, and bisecting the same file gives a boundary that drifts with unrelated edits. Don't chase it: restructure the file (fold a small extract into a larger document that already attaches, or split into two notes) and move on. Budget one retry, not an investigation.
+- **Cyrillic filenames break `import_attachment_url`** with `Invalid attachment URL` — the URL string is validated as ASCII. `import_local_files` now sanitises staging names, so the failure only reappears if you build the URL yourself. The attachment is titled from the `title` argument anyway, so the staged name never matters.
+- **`search_library` with a collection-only filter throws `TypeError: value.includes`.** Use `get_collection_items` and grep its overflow file.
+- **Verify Zotero writes via the SQLite DB, not the MCP.** `config/Zotero/zotero.sqlite` is host-visible; open read-only (`file:…?mode=ro&immutable=1`) and count `itemAttachments`/`itemNotes` by `parentItemID`. Far cheaper than `get_item_details` (which dumps every attached note body — millions of chars). MCP tool envelopes always contain `isError`, so a naive `"error" in response` success-check yields false negatives — check the DB.
 
 ## Troubleshooting
 
