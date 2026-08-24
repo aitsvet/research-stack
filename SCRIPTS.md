@@ -56,7 +56,47 @@ The pipeline is **two-pass on purpose**: pass 1 (`discover.py`) creates lightwei
 | `fetch_pdf.sh <url> <outdir> <base>` | Render a URL→PDF via the container chromium (images off by default) → md. Captures SSL-broken / anti-bot pages WebFetch can't; constraints in `ROUTES.md`. For a visual document that must keep its images (e.g. a local notes page), set `FETCH_PDF_IMAGES=1 FETCH_PDF_NO_MD=1` to skip the image-strip and the md-extraction follow-up. `url` may be `file://` or a local `http://127.0.0.1:<port>/...` (container shares host network) as well as a public URL. |
 | `md_pdf.sh <file.md\|dir> [out.pdf]` | Markdown (with relative image links) → PDF in one call, printed by the container chromium — nothing installed on the host. A dir concatenates its `*.md` (sorted) into one PDF, page break between documents. Wraps `fetch_pdf.sh` (images on, no md follow-up), serving the md's directory on `127.0.0.1:${MD_PDF_PORT:-8377}` for the print. |
 | `ingest_sources.py <manifest.json> --collection K --pdfdir D --notesdir D --state F [--serve-ip IP] [--only ID...]` | Ingest an explicit MIXED list of *known* sources into a collection + emit one paginated-md note per item. Kinds: `arxiv` (id→Atom metadata+pdf), `pdfurl`, `web` (via `fetch_pdf.sh`), `localpdf` (via `import_local_files`, needs `--serve-ip`), `meta` (metadata-only). Create-or-update via `item_key`, `replace_notes`, note 413→md-only fallback, resumable via state. **This is the reusable form of per-project one-shot ingest — don't write a new bespoke script.** Use when you already know the exact sources; use `discover.py` instead for search-based discovery / DOI bootstrap. Manifest (the project-specific data) lives in the *project* repo. |
+| `md_docx.py PAPER.md --template ACCEPTED.docx [--out F] [--image-cm N] [--check]` | Markdown article → journal-formatted `.docx`. Keeps every part of the template (styles, section properties, footnote plumbing, image relationship) and rebuilds only the body, so fidelity is a property of an already-accepted file rather than of the code. `--check` re-reads the result and diffs its paragraph text against the Markdown. |
+| `export_paper.sh PAPER.md --template ACCEPTED.docx [--name STEM]` | The whole export in one pass: `md_docx.py --check`, `officecli validate`, then PDF through the `docconv` service. The Markdown stays the only thing anyone edits. |
 | `zotero_mcp.py` | Canonical MCP JSON-RPC client (session envelope, throttle, 429 back-off) + `result_json` / `item_key` / `add_note_file` / `import_file` / `import_local_files` helpers. **Import this** in new scripts instead of re-rolling the client — every script here does. |
+
+## Markdown master → journal docx and pdf
+
+One rule makes the rest work: **the `.md` is the source, the `.docx` is a build artefact.** Nobody
+edits the docx. A change to wording, a reviewer's correction, a new figure — all of it goes into the
+Markdown, and the export runs again. Two files that are both edited will drift within a week, and
+the drift is invisible until a journal prints the wrong sentence.
+
+    export_paper.sh <project>/papers/article.md \
+        --template <project>/papers/templates/template.docx \
+        --name 'article_title'
+
+The template is the last file a journal actually accepted. Venues commonly converge on
+same shape (A4, 2 cm margins, Times New Roman 14 pt, 1.5 spacing, 1.25 cm first-line indent,
+justified body, centred title and figures, scientific adviser as a footnote on the author's name),
+and reproducing it from scratch means hand-writing `styles.xml`, the theme, numbering and content
+types. Reusing an accepted package removes that whole class of error: only the body is regenerated.
+
+Markdown the exporter understands: `# ` title, `## `/`### ` headings, `**bold**`, `*italic*`,
+`- ` bullets (emitted as en-dash paragraphs, the house convention), numbered bibliography entries,
+`![alt](fig.png)` with a following `*Рис. N …*` caption, and a `*Научный руководитель: …*` line that
+is lifted out of the body into the footnote. Diagrams come from `.puml` through the `plantuml`
+service, so the figure is a build artefact too.
+
+Proof, not hope: `--check` diffs the produced paragraphs against the Markdown and reports the count
+of differences. A submission is only ready when that number is zero and `officecli validate` is
+clean. `officecli view <file> issues` gives a second opinion; on this house format it reports
+first-line indent on headings and front matter, which is correct and expected — compare the count
+against a previously accepted file rather than chasing it to zero.
+
+Three traps that cost real time:
+
+- `w:rPr` children are order-sensitive (`rFonts`, `b`, `i`, `sz`). Emitting `i` before `b` fails
+  schema validation with a message that names the wrong element.
+- `officecli` keeps a resident process per file. After writing the docx from outside it, run
+  `officecli close FILE` or validation reads the previous bytes and reports phantom errors.
+- LibreOffice in `docconv` needs `-env:UserInstallation=file:///tmp/loprofile`, otherwise it exits
+  with "User installation could not be completed" — the image's `HOME` is not enough on its own.
 
 ## Paper ↔ discovery folder convention
 
