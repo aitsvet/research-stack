@@ -79,9 +79,47 @@ types. Reusing an accepted package removes that whole class of error: only the b
 
 Markdown the exporter understands: `# ` title, `## `/`### ` headings, `**bold**`, `*italic*`,
 `- ` bullets (emitted as en-dash paragraphs, the house convention), numbered bibliography entries,
-`![alt](fig.png)` with a following `*Рис. N …*` caption, and a `*Научный руководитель: …*` line that
-is lifted out of the body into the footnote. Diagrams come from `.puml` through the `plantuml`
-service, so the figure is a build artefact too.
+`![alt](fig.png)` with a following `*Рис. N …*` caption. Diagrams come from `.puml` through the
+`plantuml` service, so the figure is a build artefact too.
+
+Front matter is line-based, and each line is one paragraph — that is how the journal layout is
+reproduced without a separate template language:
+
+    УДК <code>
+
+    # НАЗВАНИЕ СТАТЬИ
+
+    **Фамилия И.О.**
+
+    *магистрант,*
+    *Университет,*
+    *Город, Россия*
+
+    *Научный руководитель: … .*
+    *Scientific adviser: … .*
+
+    **Аннотация**
+
+    Текст аннотации…
+
+    **Ключевые слова:** …
+
+Everything before the first `## ` heading is front matter. A standalone `**…**` line there is a
+label if it is one of `Аннотация`, `Abstract`, `Резюме`, `Summary` — those render bold, flush left;
+any other standalone `**…**` line is an author name and renders bold italic, and the first one
+carries the footnote reference. `*…*` lines render italic flush left. A second `# ` title starts the
+English block. Adviser lines — `*Научный руководитель: …*` and `*Scientific adviser: …*` — never
+appear in the body: they are lifted out and joined into the single footnote, so a bilingual footnote
+lives in the Markdown rather than in the template. The author name also becomes the document's
+`dc:creator`, so the submitted file is not authored by whatever tool built the template.
+
+Titles and section headings render bold italic; the bibliography heading and the abstract labels
+render bold upright. That split is a house choice, not a format requirement — it lives in `build()`
+and is the first thing to change if a venue asks otherwise.
+
+`--doc` additionally writes Word 97-2003 `.doc` through the same LibreOffice pass, for venues whose
+submission form rejects `.docx`. Verify it by converting the `.doc` back to PDF and comparing the
+page count and the footnote text — a silent filter failure looks like a successful conversion.
 
 Proof, not hope: `--check` diffs the produced paragraphs against the Markdown and reports the count
 of differences. A submission is only ready when that number is zero and `officecli validate` is

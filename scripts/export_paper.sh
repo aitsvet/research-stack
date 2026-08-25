@@ -12,6 +12,7 @@
 #
 # --name is the file stem the journal should receive (defaults to the .md stem).
 # --image-cm sets figure width (default 15).
+# --doc also writes Word 97-2003 .doc, for journals that ask for that format.
 #
 # The PDF step runs LibreOffice inside the docconv compose service so the host
 # stays free of LibreOffice and the rendering matches earlier submissions
@@ -19,12 +20,13 @@
 set -euo pipefail
 
 STACK="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MD=""; TEMPLATE="${DOCX_TEMPLATE:-}"; NAME=""; IMAGE_CM=15
+MD=""; TEMPLATE="${DOCX_TEMPLATE:-}"; NAME=""; IMAGE_CM=15; DOC=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --template) TEMPLATE="$2"; shift 2 ;;
     --name)     NAME="$2"; shift 2 ;;
     --image-cm) IMAGE_CM="$2"; shift 2 ;;
+    --doc)      DOC=1; shift ;;
     -*) echo "unknown option: $1" >&2; exit 2 ;;
     *)  MD="$1"; shift ;;
   esac
@@ -52,6 +54,14 @@ cp "$DOCX" "$STAGE/"
     --entrypoint soffice docconv -env:UserInstallation=file:///tmp/loprofile \
     --headless --convert-to pdf --outdir /corpus "/corpus/$NAME.docx" >/dev/null )
 cp "$STAGE/$NAME.pdf" "$OUT_DIR/"
+
+if [ "$DOC" = 1 ]; then
+  ( cd "$STACK" && CORPUS="$STAGE" docker compose --profile tools run --rm \
+      --entrypoint soffice docconv -env:UserInstallation=file:///tmp/loprofile \
+      --headless --convert-to "doc:MS Word 97" --outdir /corpus "/corpus/$NAME.docx" >/dev/null )
+  cp "$STAGE/$NAME.doc" "$OUT_DIR/"
+  echo "doc:  $OUT_DIR/$NAME.doc"
+fi
 
 echo "docx: $DOCX"
 echo "pdf:  $OUT_DIR/$NAME.pdf ($(pdfinfo "$OUT_DIR/$NAME.pdf" | awk '/^Pages/{print $2}') pages)"
