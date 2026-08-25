@@ -121,6 +121,19 @@ and is the first thing to change if a venue asks otherwise.
 submission form rejects `.docx`. Verify it by converting the `.doc` back to PDF and comparing the
 page count and the footnote text — a silent filter failure looks like a successful conversion.
 
+### Showing an editor what changed
+
+`mark_changes.py PAPER.md --since REV` writes `_PAPER_marked.md`, a copy in which every word that
+changed since the git revision is wrapped in `==...==`. `md_docx.py` renders those spans on a yellow
+background, so exporting the marked copy under its own `--name` produces a docx and pdf that carry
+the edits in place. Someone holding the previous export then reads the delta instead of the paper.
+
+The marked copy is a build input, never a second master: generate it, export it, delete it. Lines
+carrying markdown emphasis or a heading marker are skipped, because a `==` span straddling a
+`**bold**` pair breaks the run splitter and a highlighted title tells an editor nothing. `--gap`
+(default 2) bridges short unmarked stretches between two marked ones so one edit reads as one
+highlight rather than a dotted line of fragments.
+
 Proof, not hope: `--check` diffs the produced paragraphs against the Markdown and reports the count
 of differences. A submission is only ready when that number is zero and `officecli validate` is
 clean. `officecli view <file> issues` gives a second opinion; on this house format it reports

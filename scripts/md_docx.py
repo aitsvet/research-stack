@@ -20,6 +20,7 @@ of the template, not of this code.
 it is the only cheap proof that the export says what the master says.
 
 Markdown handled: `# ` title, `## `/`### ` headings, `**bold**`, `*italic*`,
+`==marked==` (yellow highlight, for showing an editor what changed),
 `- ` bullets (rendered as en-dash paragraphs, the house convention), numbered
 bibliography entries, `![alt](fig.png)` and a `*Рис. N ...*` caption.
 
@@ -55,8 +56,10 @@ FRONT_LABELS = {'Аннотация', 'Abstract', 'Резюме', 'Summary'}
 FNREF = '<w:r><w:rPr><w:rStyle w:val="FootnoteReference" /></w:rPr><w:footnoteReference w:id="1" /></w:r>'
 
 
-def rpr(bold=False, italic=False):
-    return TNR + ('<w:b />' if bold else '') + ('<w:i />' if italic else '') + '<w:sz w:val="28" />'
+def rpr(bold=False, italic=False, mark=False):
+    # rPr children are order-sensitive: rFonts, b, i, sz, highlight.
+    return (TNR + ('<w:b />' if bold else '') + ('<w:i />' if italic else '')
+            + '<w:sz w:val="28" />' + ('<w:highlight w:val="yellow" />' if mark else ''))
 
 
 def esc(s):
@@ -65,17 +68,23 @@ def esc(s):
 
 def runs(text, italic=False):
     out = []
-    for part in re.split(r'(\*\*[^*]+\*\*|\*[^*]+\*)', text):
-        if not part:
+    for chunk in re.split(r'(==[^=]+==)', text):
+        if not chunk:
             continue
-        if part.startswith('**') and part.endswith('**'):
-            b, i, body = True, italic, part[2:-2]
-        elif part.startswith('*') and part.endswith('*'):
-            b, i, body = False, True, part[1:-1]
-        else:
-            b, i, body = False, italic, part
-        out.append('<w:r><w:rPr>%s</w:rPr><w:t xml:space="preserve">%s</w:t></w:r>'
-                   % (rpr(b, i), esc(body)))
+        mark = chunk.startswith('==') and chunk.endswith('==')
+        if mark:
+            chunk = chunk[2:-2]
+        for part in re.split(r'(\*\*[^*]+\*\*|\*[^*]+\*)', chunk):
+            if not part:
+                continue
+            if part.startswith('**') and part.endswith('**'):
+                b, i, body = True, italic, part[2:-2]
+            elif part.startswith('*') and part.endswith('*'):
+                b, i, body = False, True, part[1:-1]
+            else:
+                b, i, body = False, italic, part
+            out.append('<w:r><w:rPr>%s</w:rPr><w:t xml:space="preserve">%s</w:t></w:r>'
+                       % (rpr(b, i, mark), esc(body)))
     return ''.join(out)
 
 
@@ -203,7 +212,7 @@ def check(md_path, out_path):
 
     def clean(s):
         s = s.strip()
-        s = re.sub(r'^#{1,6}\s*', '', s).replace('**', '')
+        s = re.sub(r'^#{1,6}\s*', '', s).replace('**', '').replace('==', '')
         s = re.sub(r'^\*(.+)\*$', r'\1', s)
         return re.sub(r'^- ', '– ', s)
 
