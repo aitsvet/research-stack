@@ -21,8 +21,13 @@ it is the only cheap proof that the export says what the master says.
 
 Markdown handled: `# ` title, `## `/`### ` headings, `**bold**`, `*italic*`,
 `- ` bullets (rendered as en-dash paragraphs, the house convention), numbered
-bibliography entries, `![alt](fig.png)` and a `*Рис. N ...*` caption. A line
-`*Научный руководитель: ...*` is lifted out of the body into the footnote.
+bibliography entries, `![alt](fig.png)` and a `*Рис. N ...*` caption.
+
+Front matter is everything before the first `## `, and there each line is one
+paragraph: `**Name**` renders bold italic (the first one carries the footnote
+reference and becomes dc:creator), `**Аннотация**`/`**Abstract**` render bold
+upright as labels, `*text*` renders italic. Adviser lines, Russian and English,
+are lifted out of the body and joined into the single footnote.
 
 Traps worth knowing:
   * rPr children are order-sensitive: rFonts, b, i, sz. b after i fails schema
@@ -46,6 +51,7 @@ SECT = ('<w:sectPr><w:pgSz w:w="11906" w:h="16838" w:orient="portrait" />'
         '<w:docGrid w:type="default" /></w:sectPr>')
 INDENT = 709            # 1.25 cm first line
 LINE = 360              # 1.5 spacing
+FRONT_LABELS = {'Аннотация', 'Abstract', 'Резюме', 'Summary'}
 FNREF = '<w:r><w:rPr><w:rStyle w:val="FootnoteReference" /></w:rPr><w:footnoteReference w:id="1" /></w:r>'
 
 
@@ -107,15 +113,19 @@ def build(md_path, template, out_path, image_cm):
                     zt.read('word/_rels/document.xml.rels').decode('utf8'))
     rid = rid.group(1) if rid else None
 
-    paras, adviser, figure, pid = [], None, None, 0x00100000
+    paras, adviser, figure, pid = [], [], None, 0x00100000
+    front, titles, named = True, 0, False
     for raw in lines:
         s = raw.strip()
         if not s:
             continue
-        if s.startswith('*Научный руководитель:'):
-            adviser = s.strip('*')
+        if re.match(r'^\*(Научный руководитель|Scientific advis[eo]r):', s):
+            adviser.append(s.strip('*'))
             continue
+        if s.startswith('## '):
+            front = False
         m = re.match(r'^!\[[^\]]*\]\(([^)]+)\)$', s)
+        lbl = re.match(r'^\*\*([^*]+)\*\*$', s)
         if m:
             if rid is None:
                 sys.exit('template has no image relationship; cannot place a figure')
@@ -127,28 +137,40 @@ def build(md_path, template, out_path, image_cm):
         elif s.startswith('УДК'):
             p = ppr(jc='left') + runs(s)
         elif s.startswith('# '):
-            p = ppr(before=240, ind=0, jc='center') + runs('**' + s[2:] + '**')
-        elif s.startswith('### '):
-            p = ppr(before=120, ind=0, jc='left') + runs('**' + s[4:] + '**')
+            titles += 1
+            p = ppr(before=0 if titles == 1 else 240, ind=0, jc='center') + runs('**' + s[2:] + '**', italic=True)
+        elif front and lbl and lbl.group(1) in FRONT_LABELS:
+            p = ppr(before=240, ind=0, jc='left') + runs(s)
+        elif front and lbl:
+            p = ppr(before=240, ind=0, jc='left') + runs(s, italic=True)
+            if not named:
+                p, named = p + FNREF, lbl.group(1)
+        elif front and s.startswith('*') and s.endswith('*'):
+            p = ppr(ind=0, jc='left') + runs(s)
         elif re.match(r'^## Библиографический', s):
-            p = ppr(before=240, ind=0, jc='left') + runs(s[3:])
+            p = ppr(before=240, ind=0, jc='left') + runs('**' + s[3:] + '**')
+        elif s.startswith('### '):
+            p = ppr(before=120, ind=0, jc='left') + runs('**' + s[4:] + '**', italic=True)
         elif s.startswith('## '):
-            p = ppr(before=240, after=120, ind=0, jc='left') + runs('**' + s[3:] + '**')
+            p = ppr(before=240, after=120, ind=0, jc='left') + runs('**' + s[3:] + '**', italic=True)
         elif re.match(r'^\*Рис\.', s):
             p = ppr(after=120, ind=0, jc='center') + runs(s)
-        elif re.match(r'^\*\*[А-ЯЁA-Z][^*]*\*\*$', s) and adviser is None and len(paras) < 8:
-            p = ppr(before=240, ind=0, jc='left') + runs(s, italic=True) + FNREF
-        elif s.startswith('*') and s.endswith('*') and len(paras) < 8:
-            p = ppr(ind=0, jc='left') + runs(s)
         elif s.startswith('- '):
             p = ppr(ind=INDENT) + runs('– ' + s[2:])
         else:
             p = ppr(ind=INDENT) + runs(s)
         paras.append('<w:p w14:paraId="%08X" w14:textId="%08X">%s</w:p>' % (pid, pid + 1, p))
         pid += 2
+    adviser = ' '.join(adviser) or None
 
     head = re.match(r'^(.*?<w:body>)', zt.read('word/document.xml').decode('utf8'), re.S).group(1)
     doc = head + ''.join(paras) + SECT + '</w:body></w:document>'
+
+    core = None
+    if named and 'docProps/core.xml' in zt.namelist():
+        core = zt.read('docProps/core.xml').decode('utf8')
+        for tag in ('dc:creator', 'cp:lastModifiedBy'):
+            core = re.sub(r'<%s>[^<]*</%s>' % (tag, tag), '<%s>%s</%s>' % (tag, esc(named), tag), core)
 
     fn = zt.read('word/footnotes.xml').decode('utf8') if 'word/footnotes.xml' in zt.namelist() else None
     if fn and adviser:
@@ -163,6 +185,8 @@ def build(md_path, template, out_path, image_cm):
                 out.writestr(n, open(figure, 'rb').read())
             elif fn and n == 'word/footnotes.xml':
                 out.writestr(n, fn.encode('utf8'))
+            elif core and n == 'docProps/core.xml':
+                out.writestr(n, core.encode('utf8'))
             else:
                 out.writestr(n, zt.read(n))
     return len(paras), adviser, figure
@@ -186,7 +210,7 @@ def check(md_path, out_path):
     tgt = []
     for l in io.open(md_path, encoding='utf8').read().split('\n'):
         s = l.strip()
-        if not s or s.startswith('*Научный руководитель:'):
+        if not s or re.match(r'^\*(Научный руководитель|Scientific advis[eo]r):', s):
             continue
         tgt.append('IMG' if s.startswith('![') else clean(s))
     norm = lambda s: re.sub(r'\s+', ' ', s).strip()
