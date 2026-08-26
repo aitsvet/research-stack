@@ -53,7 +53,28 @@ SECT = ('<w:sectPr><w:pgSz w:w="11906" w:h="16838" w:orient="portrait" />'
 INDENT = 709            # 1.25 cm first line
 LINE = 360              # 1.5 spacing
 FRONT_LABELS = {'Аннотация', 'Abstract', 'Резюме', 'Summary'}
-FNREF = '<w:r><w:rPr><w:rStyle w:val="FootnoteReference" /></w:rPr><w:footnoteReference w:id="1" /></w:r>'
+FNREF = ('<w:r><w:rPr><w:rStyle w:val="FootnoteReference" />'
+         '<w:vertAlign w:val="superscript" /></w:rPr>'
+         '<w:footnoteReference w:id="1" /></w:r>')
+FNSTYLE = ('<w:style w:type="character" w:styleId="FootnoteReference">'
+           '<w:name w:val="footnote reference" /><w:uiPriority w:val="99" />'
+           '<w:semiHidden /><w:unhideWhenUsed />'
+           '<w:rPr><w:vertAlign w:val="superscript" /></w:rPr></w:style>')
+
+
+def footnote_xml(lines):
+    """Сноска руководителя: надстрочный номер, каждая строка своим абзацем."""
+    mark = ('<w:r><w:rPr><w:rStyle w:val="FootnoteReference" />'
+            '<w:vertAlign w:val="superscript" /></w:rPr><w:footnoteRef /></w:r>')
+    out = ['<w:footnote w:id="1">']
+    for i, line in enumerate(lines):
+        text = (' ' if i == 0 else '') + esc(line)
+        out.append('<w:p><w:pPr>%s<w:jc w:val="left" /></w:pPr>%s'
+                   '<w:r><w:t xml:space="preserve">%s</w:t></w:r></w:p>'
+                   % ('<w:spacing w:line="240" w:lineRule="auto" />',
+                      mark if i == 0 else '', text))
+    out.append('</w:footnote>')
+    return ''.join(out)
 
 
 def rpr(bold=False, italic=False, mark=False):
@@ -159,7 +180,7 @@ def build(md_path, template, out_path, image_cm):
         elif front and s.startswith('*') and s.endswith('*'):
             p = ppr(ind=0, jc='left') + runs(s)
         elif re.match(r'^## Библиографический', s):
-            p = ppr(before=240, ind=0, jc='left') + runs('**' + s[3:] + '**')
+            p = ppr(before=240, ind=0, jc='center') + runs('**' + s[3:] + '**')
         elif s.startswith('### '):
             p = ppr(before=120, ind=0, jc='left') + runs('**' + s[4:] + '**', italic=True)
         elif s.startswith('## '):
@@ -170,7 +191,7 @@ def build(md_path, template, out_path, image_cm):
             p = ppr(ind=INDENT) + runs(s)
         paras.append('<w:p w14:paraId="%08X" w14:textId="%08X">%s</w:p>' % (pid, pid + 1, p))
         pid += 2
-    adviser = ' '.join(adviser) or None
+    adviser = adviser or None
 
     head = re.match(r'^(.*?<w:body>)', zt.read('word/document.xml').decode('utf8'), re.S).group(1)
     doc = head + ''.join(paras) + SECT + '</w:body></w:document>'
@@ -183,8 +204,14 @@ def build(md_path, template, out_path, image_cm):
 
     fn = zt.read('word/footnotes.xml').decode('utf8') if 'word/footnotes.xml' in zt.namelist() else None
     if fn and adviser:
-        fn = re.sub(r'(<w:t xml:space="preserve">) [^<]*(</w:t>)',
-                    lambda m: m.group(1) + ' ' + esc(adviser) + m.group(2), fn)
+        fn = re.sub(r'<w:footnote w:id="1">.*?</w:footnote>',
+                    lambda m: footnote_xml(adviser), fn, flags=re.S)
+
+    st = zt.read('word/styles.xml').decode('utf8')
+    if 'w:styleId="FootnoteReference"' not in st:
+        st = st.replace('</w:styles>', FNSTYLE + '</w:styles>')
+    else:
+        st = None
 
     with zipfile.ZipFile(out_path, 'w', zipfile.ZIP_DEFLATED) as out:
         for n in zt.namelist():
@@ -194,6 +221,8 @@ def build(md_path, template, out_path, image_cm):
                 out.writestr(n, open(figure, 'rb').read())
             elif fn and n == 'word/footnotes.xml':
                 out.writestr(n, fn.encode('utf8'))
+            elif st and n == 'word/styles.xml':
+                out.writestr(n, st.encode('utf8'))
             elif core and n == 'docProps/core.xml':
                 out.writestr(n, core.encode('utf8'))
             else:
