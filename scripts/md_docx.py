@@ -148,6 +148,8 @@ def build(md_path, template, out_path, image_cm):
         elif s.startswith('# '):
             titles += 1
             p = ppr(before=0 if titles == 1 else 240, ind=0, jc='center') + runs('**' + s[2:] + '**', italic=True)
+        elif re.match(r'^\*Рис\.', s):
+            p = ppr(after=120, ind=0, jc='center') + runs(s)
         elif front and lbl and lbl.group(1) in FRONT_LABELS:
             p = ppr(before=240, ind=0, jc='left') + runs(s)
         elif front and lbl:
@@ -162,8 +164,6 @@ def build(md_path, template, out_path, image_cm):
             p = ppr(before=120, ind=0, jc='left') + runs('**' + s[4:] + '**', italic=True)
         elif s.startswith('## '):
             p = ppr(before=240, after=120, ind=0, jc='left') + runs('**' + s[3:] + '**', italic=True)
-        elif re.match(r'^\*Рис\.', s):
-            p = ppr(after=120, ind=0, jc='center') + runs(s)
         elif s.startswith('- '):
             p = ppr(ind=INDENT) + runs('– ' + s[2:])
         else:
