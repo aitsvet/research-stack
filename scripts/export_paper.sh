@@ -32,7 +32,12 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ -n "$MD" ] || { echo "usage: export_paper.sh PAPER.md --template ACCEPTED.docx [--name STEM]" >&2; exit 2; }
-[ -n "$TEMPLATE" ] || { echo "--template (or \$DOCX_TEMPLATE) is required" >&2; exit 2; }
+[ -n "$TEMPLATE" ] || { echo "--template (or \$DOCX_TEMPLATE) is required." >&2
+  echo "The template is a build input, not an artefact: md_docx.py keeps its styles," >&2
+  echo "section properties and footnote plumbing and rebuilds only the body. Keep one" >&2
+  echo "in version control next to the papers, e.g. <project>/papers/templates/*.docx," >&2
+  echo "and make it from an accepted submission with scripts/make_docx_template.py." >&2
+  exit 2; }
 
 MD_ABS="$(readlink -f "$MD")"
 OUT_DIR="$(dirname "$MD_ABS")"
