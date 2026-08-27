@@ -30,6 +30,7 @@ verdict — a legitimate short closing sentence and a telegraphic stub count the
 """
 import argparse
 import difflib
+from collections import Counter
 import json
 import os
 import re
@@ -49,6 +50,7 @@ DEFAULTS = {
     "ngram_min": 3,
     "dup_ratio": 0.72,
     "dup_min_words": 8,
+    "dup_shared_words": 3,
     "ref_window": 2,
     "gloss": [],
     "gloss_chars": 140,
@@ -114,21 +116,44 @@ def check_repeats(paras, cfg, add):
 
 
 def check_duplicates(sents, cfg, add):
+    """Near-identical sentence pairs — the same thesis written twice.
+
+    Comparing every pair is quadratic and unusable on a full-length master, so candidates come
+    from an inverted index over the words that are rare *in this document*: two sentences that
+    say the same thing share several of them, and two unrelated ones share none.
+    """
     floor, minw = cfg["dup_ratio"], cfg["dup_min_words"]
-    keys = [(s, " ".join(norm_words(s))) for s in sents]
-    keys = [(s, k) for s, k in keys if len(k.split()) >= minw]
-    for i in range(len(keys)):
-        a_s, a_k = keys[i]
-        for j in range(i + 1, len(keys)):
-            b_s, b_k = keys[j]
-            if abs(len(a_k) - len(b_k)) > len(a_k) * 0.5:
+    items = []
+    for s in sents:
+        w = norm_words(s)
+        if len(w) >= minw:
+            items.append((s, " ".join(w), set(w)))
+    df = Counter(w for _, _, ws in items for w in ws)
+    cap = max(3, int(len(items) * 0.08))
+    index = {}
+    for i, (_, _, ws) in enumerate(items):
+        for w in ws:
+            if df[w] <= cap:
+                index.setdefault(w, []).append(i)
+    for i, (s_i, k_i, ws_i) in enumerate(items):
+        shared = Counter()
+        for w in ws_i:
+            if df[w] <= cap:
+                for j in index[w]:
+                    if j > i:
+                        shared[j] += 1
+        for j, n in shared.items():
+            if n < cfg["dup_shared_words"]:
                 continue
-            m = difflib.SequenceMatcher(None, a_k, b_k, autojunk=False)
+            s_j, k_j, _ = items[j]
+            if abs(len(k_i) - len(k_j)) > len(k_i) * 0.5:
+                continue
+            m = difflib.SequenceMatcher(None, k_i, k_j, autojunk=False)
             if m.real_quick_ratio() < floor or m.quick_ratio() < floor:
                 continue
             r = m.ratio()
             if r >= floor:
-                add("duplicates", f"similarity {r:.2f}", [a_s[:200], b_s[:200]])
+                add("duplicates", f"similarity {r:.2f}", [s_i[:200], s_j[:200]])
 
 
 def check_shape(paras, sents, cfg, add):
