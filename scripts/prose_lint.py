@@ -21,6 +21,7 @@ their defaults and the vocabulary checks stay silent.
     punctuation   colon and dash density per hundred paragraphs
     citations     the same [n] repeated inside a short window of paragraphs
     glossing      a listed term whose first use carries no parenthetical explanation
+    participles   configured word-form regexes per hundred sentences and per paragraph
 
 ``stop_at`` ends the body at the bibliography and ``skip`` drops front-matter label lines; both are
 regexes in the config, because where the prose starts and stops is a house convention.
@@ -54,6 +55,10 @@ DEFAULTS = {
     "ref_window": 2,
     "gloss": [],
     "gloss_chars": 140,
+    "participle_patterns": [],
+    "participle_ignore": [],
+    "participles_per_100": None,
+    "participles_per_para": None,
     "stop_at": r"(?i)^(#+\s*)?(\*+)?\s*(библиограф|список литературы|references|bibliograph)",
     "skip": r"(?i)^(\*+)?\s*(УДК|UDC|Ключевые слова|Keywords|Аннотация|Abstract|Резюме|Summary"
             r"|Научный руководитель|Scientific adviser)",
@@ -218,6 +223,40 @@ def check_glossing(paras, cfg, add):
             add("glossing", f"«{term}» first use carries no parenthetical", [ctx(body, m.start())])
 
 
+def check_participles(paras, sents, cfg, add):
+    """Count project-defined word forms without carrying language rules in this script."""
+    patterns = [re.compile(p, re.I | re.UNICODE) for p in cfg["participle_patterns"]]
+    if not patterns:
+        return
+    ignored = [re.compile(p, re.I | re.UNICODE) for p in cfg["participle_ignore"]]
+    per_para = []
+    for p in paras:
+        hits = [
+            word for word in WORD.findall(p.text)
+            if any(pattern.search(word) for pattern in patterns)
+            and not any(pattern.search(word) for pattern in ignored)
+        ]
+        per_para.append((p, hits))
+
+    total = sum(len(hits) for _, hits in per_para)
+    rate = total * 100.0 / max(len(sents), 1)
+    rate_limit = cfg["participles_per_100"]
+    para_limit = cfg["participles_per_para"]
+    crowded = [item for item in per_para if para_limit and len(item[1]) >= para_limit]
+
+    rate_band = f" (limit {rate_limit:g})" if rate_limit is not None else ""
+    para_band = (f"; {len(crowded)} paragraphs with {para_limit}+ forms"
+                 if para_limit is not None else "")
+    add("participles", f"{total} matching forms / {len(sents)} sentences = "
+        f"{rate:.1f} per 100{rate_band}{para_band}", [])
+
+    if rate_limit is not None and rate > rate_limit:
+        add("participles_limit", f"{rate:.1f} per 100 > {rate_limit:g}", [])
+    for p, hits in crowded:
+        add("participles_limit", f"{len(hits)} forms in one paragraph: "
+            + ", ".join(hits), [p.text[:200] + ("…" if len(p.text) > 200 else "")])
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -260,6 +299,7 @@ def main():
         "punctuation": lambda: check_punctuation(prose, cfg, add),
         "citations": lambda: check_citations(prose, cfg, add),
         "glossing": lambda: check_glossing(prose, cfg, add),
+        "participles": lambda: check_participles(prose, sents, cfg, add),
     }
     for name, fn in checks.items():
         if a.only and name not in a.only:
@@ -273,7 +313,12 @@ def main():
         print(f"{a.draft}: {len(prose)} prose paragraphs, {len(sents)} sentences "
               f"(body up to the bibliography)\n")
         for name in checks:
-            wanted = ("paragraphs", "sentences") if name == "shape" else (name,)
+            if name == "shape":
+                wanted = ("paragraphs", "sentences")
+            elif name == "participles":
+                wanted = ("participles", "participles_limit")
+            else:
+                wanted = (name,)
             items = [f for f in findings if f["check"] in wanted]
             if not items:
                 continue
@@ -286,7 +331,8 @@ def main():
         if not findings:
             print("nothing reported")
 
-    hard = [f for f in findings if f["check"] not in ("paragraphs", "sentences", "punctuation")]
+    hard = [f for f in findings if f["check"] not in
+            ("paragraphs", "sentences", "punctuation", "participles")]
     sys.exit(1 if a.strict and hard else 0)
 
 
