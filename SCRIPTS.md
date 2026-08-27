@@ -156,6 +156,13 @@ failure the editor cannot see and will find later.
 
 ### Counting what the eye re-reads
 
+The participle check earns its place because the threshold is calibrated, not invented: set it from
+a paper the venue has already accepted, and a draft carrying half again as many participial turns
+reads as a different register even when every sentence is grammatical. A term-density check was
+tried alongside it and dropped — an accepted paper scored worse than the draft it was meant to
+flag, because a paragraph about leases is supposed to say «аренда» often. A check that cannot
+separate the defect from the norm measures nothing and is not worth shipping.
+
 `prose_lint.py` mechanises the sweep that otherwise runs by eye every round. Keep the bands and the
 banned list in the *project*, next to the papers, and derive them from what the venue actually
 prints rather than from taste:
