@@ -13,6 +13,10 @@
 # --name is the file stem the journal should receive (defaults to the .md stem).
 # --image-cm sets figure width (default 15).
 # --doc also writes Word 97-2003 .doc, for journals that ask for that format.
+# --record FILE appends what was actually produced — date, file name, page count,
+# sha256 — to a committed log. The artefacts themselves are build output and stay
+# out of version control, so without this nothing in the repository says which
+# bytes a venue received.
 #
 # The PDF step runs LibreOffice inside the docconv compose service so the host
 # stays free of LibreOffice and the rendering matches earlier submissions
@@ -20,13 +24,14 @@
 set -euo pipefail
 
 STACK="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MD=""; TEMPLATE="${DOCX_TEMPLATE:-}"; NAME=""; IMAGE_CM=15; DOC=0
+MD=""; TEMPLATE="${DOCX_TEMPLATE:-}"; NAME=""; IMAGE_CM=15; DOC=0; RECORD=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --template) TEMPLATE="$2"; shift 2 ;;
     --name)     NAME="$2"; shift 2 ;;
     --image-cm) IMAGE_CM="$2"; shift 2 ;;
     --doc)      DOC=1; shift ;;
+    --record)   RECORD="$2"; shift 2 ;;
     -*) echo "unknown option: $1" >&2; exit 2 ;;
     *)  MD="$1"; shift ;;
   esac
@@ -68,5 +73,14 @@ if [ "$DOC" = 1 ]; then
   echo "doc:  $OUT_DIR/$NAME.doc"
 fi
 
+PAGES="$(pdfinfo "$OUT_DIR/$NAME.pdf" | awk '/^Pages/{print $2}')"
 echo "docx: $DOCX"
-echo "pdf:  $OUT_DIR/$NAME.pdf ($(pdfinfo "$OUT_DIR/$NAME.pdf" | awk '/^Pages/{print $2}') pages)"
+echo "pdf:  $OUT_DIR/$NAME.pdf ($PAGES pages)"
+
+if [ -n "$RECORD" ]; then
+  [ "$DOC" = 1 ] && FINAL="$OUT_DIR/$NAME.doc" || FINAL="$DOCX"
+  [ -f "$RECORD" ] || printf '# Submitted files\n\nBuild artefacts are not versioned; this is what was produced and sent.\n\n| Date | File | Pages | sha256 |\n|---|---|---|---|\n' > "$RECORD"
+  printf '| %s | %s | %s | %s |\n' "$(date -I)" "$(basename "$FINAL")" "$PAGES" \
+      "$(sha256sum "$FINAL" | cut -c1-64)" >> "$RECORD"
+  echo "record: $RECORD"
+fi

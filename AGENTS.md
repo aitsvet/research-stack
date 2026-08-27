@@ -48,6 +48,8 @@ in paywall/HTML noise that has to be re-cleaned. Mechanics and the full rational
 
 Once `extract_texts.py` has produced the per-item `.txt`, drive synthesis off those, never the PDFs. Fan out **one reader-subagent per section** over just that section's `text/<itemKey>.txt`; each returns a short digest — citeable points tagged with the `itemKey`, the key caveats, and an explicit list of claims it could **not** find in the text (so nothing gets invented to fill a gap). The orchestrator writes the draft from the digests, keeping its own context lean. Build the reference list from Crossref (pull first-author / year / venue per DOI) rather than from model memory — that removes the hallucinated-author failure mode at the source — then gate on `verify_refs.py --per-line` before declaring done.
 
+From draft to submission the loop is `export_paper.sh` → the editor marks up the exported file by hand → `merge_edits.py` folds their copy back in as a three-way paragraph merge. `prose_lint.py` counts what would otherwise be re-read by eye each round; its bands and word lists live in the project, never here. Mechanics and traps: `SCRIPTS.md`.
+
 ## Separate ability: deck pipeline (not part of the research stack)
 
 `scripts/deck/` — self-contained slide-making toolkit (pptx profiling + lint, browser-measured layout through the container Chromium). It shares only the venv and Chromium with the stack above; nothing else in this file applies to it. Before ANY pptx work read `scripts/deck/SKILL.md` and follow its observe → measure → lint loop.

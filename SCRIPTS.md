@@ -58,6 +58,8 @@ The pipeline is **two-pass on purpose**: pass 1 (`discover.py`) creates lightwei
 | `ingest_sources.py <manifest.json> --collection K --pdfdir D --notesdir D --state F [--serve-ip IP] [--only ID...]` | Ingest an explicit MIXED list of *known* sources into a collection + emit one paginated-md note per item. Kinds: `arxiv` (id→Atom metadata+pdf), `pdfurl`, `web` (via `fetch_pdf.sh`), `localpdf` (via `import_local_files`, needs `--serve-ip`), `meta` (metadata-only). Create-or-update via `item_key`, `replace_notes`, note 413→md-only fallback, resumable via state. **This is the reusable form of per-project one-shot ingest — don't write a new bespoke script.** Use when you already know the exact sources; use `discover.py` instead for search-based discovery / DOI bootstrap. Manifest (the project-specific data) lives in the *project* repo. |
 | `md_docx.py PAPER.md --template ACCEPTED.docx [--out F] [--image-cm N] [--check]` | Markdown article → journal-formatted `.docx`. Keeps every part of the template (styles, section properties, footnote plumbing, image relationship) and rebuilds only the body, so fidelity is a property of an already-accepted file rather than of the code. `--check` re-reads the result and diffs its paragraph text against the Markdown. |
 | `export_paper.sh PAPER.md --template ACCEPTED.docx [--name STEM]` | The whole export in one pass: `md_docx.py --check`, `officecli validate`, then PDF through the `docconv` service. The Markdown stays the only thing anyone edits. |
+| `merge_edits.py PAPER.md --sent REV|FILE --returned EDITED.docx [--apply]` | Three-way paragraph reconciliation of an editor's hand-edited copy against the revision they were sent and the current master. `.docx` is read straight out of the package, `.doc`/`.odt`/`.rtf` go through `convert_office.py`. Citation markers are blanked before comparing, so one renumbering pass does not mark every paragraph as changed. Verdicts: ACCEPT (only the editor moved), MINE, CONVERGED, CONFLICT, DROPPED, ADDED, NEW. `--apply` takes only the ACCEPT class and only where the master line is unambiguous; everything else is a decision. Front matter lies here by construction — adviser lines become a footnote and label markers vanish in the export, so they surface as DROPPED and ACCEPT. |
+| `prose_lint.py DRAFT.md [--config C.json] [--only CHECK] [--strict]` | The reading passes a long draft needs on every round, counted instead of eyeballed: banned tics, recurring word n-grams, near-duplicate sentence pairs (the same thesis stated twice), paragraph and sentence length against bands, telegraphic paragraph openers and closers, colon/dash density, the same `[n]` repeated within a short window, and listed terms whose first use carries no parenthetical gloss. Every threshold and word list lives in the project's config — this script carries no vocabulary of its own. Advisory by default; findings are places to look. |
 | `make_docx_template.py ACCEPTED.docx TEMPLATE.docx` | Accepted submission → reusable, text-free export template. The template is a **build input** for `md_docx.py`, so it has to be committed; the accepted file itself must not be, since it carries the manuscript and its figure. Body reduced to an empty paragraph plus the original `sectPr`, footnote 1 kept as an empty slot, figure replaced by a 1×1 placeholder, `docProps` cleared. Prove the result by exporting the same Markdown through both templates and comparing page count, page size, extracted text, font set and `sectPr`. |
 | `zotero_mcp.py` | Canonical MCP JSON-RPC client (session envelope, throttle, 429 back-off) + `result_json` / `item_key` / `add_note_file` / `import_file` / `import_local_files` helpers. **Import this** in new scripts instead of re-rolling the client — every script here does. |
 
@@ -122,6 +124,11 @@ and is the first thing to change if a venue asks otherwise.
 submission form rejects `.docx`. Verify it by converting the `.doc` back to PDF and comparing the
 page count and the footnote text — a silent filter failure looks like a successful conversion.
 
+`--record FILE` appends the date, file name, page count and sha256 of what was produced to a
+committed log. The artefacts are build output and stay out of version control, so without this the
+repository holds no answer to «which bytes did the venue receive» — and a rebuild months later is
+not evidence, because the master has moved.
+
 ### Showing an editor what changed
 
 `mark_changes.py PAPER.md --since REV` writes `_PAPER_marked.md`, a copy in which every word that
@@ -134,6 +141,30 @@ carrying markdown emphasis or a heading marker are skipped, because a `==` span 
 `**bold**` pair breaks the run splitter and a highlighted title tells an editor nothing. `--gap`
 (default 2) bridges short unmarked stretches between two marked ones so one edit reads as one
 highlight rather than a dotted line of fragments.
+
+### Taking an editor's corrections back
+
+The editor does not edit the master — they edit the export and send it back, and by then the master
+has usually moved too. That is a three-way merge and skimming a diff loses paragraphs silently:
+
+    merge_edits.py PAPER.md --sent <rev-that-was-sent> --returned EDITED.doc
+
+Give the git revision that actually went out rather than trusting memory of it. Take the ACCEPT
+class verbatim — the editor's wording is the decision, not a draft to improve — reconcile CONFLICT
+by hand, and name in the reply what was not carried across and why. A dropped paragraph is the one
+failure the editor cannot see and will find later.
+
+### Counting what the eye re-reads
+
+`prose_lint.py` mechanises the sweep that otherwise runs by eye every round. Keep the bands and the
+banned list in the *project*, next to the papers, and derive them from what the venue actually
+prints rather than from taste:
+
+    prose_lint.py papers/x/PAPER.md --config papers/prose_lint.json
+
+`stop_at` ends the body at the bibliography and `skip` drops front-matter label lines; both are
+regexes, because where prose begins and ends is a house convention. Nothing here replaces reading —
+it just stops the mechanical part from consuming the attention that reading needs.
 
 Proof, not hope: `--check` diffs the produced paragraphs against the Markdown and reports the count
 of differences. A submission is only ready when that number is zero and `officecli validate` is
