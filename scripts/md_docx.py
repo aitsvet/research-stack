@@ -21,8 +21,10 @@ it is the only cheap proof that the export says what the master says.
 
 Markdown handled: `# ` title, `## `/`### ` headings, `**bold**`, `*italic*`,
 `==marked==` (yellow highlight, for showing an editor what changed),
-`- ` bullets (rendered as en-dash paragraphs, the house convention), numbered
-bibliography entries, `![alt](fig.png)` and a `*Рис. N ...*` caption.
+`- ` bullets (rendered as en-dash paragraphs, the house convention),
+`![alt](fig.png)` and a `*Рис. N ...*` caption. Numbered lines get no special
+handling: `1. ` stays literal text in an ordinary body paragraph, which is what
+a bibliography wants and why in-body enumerations use `- ` instead.
 
 Front matter is everything before the first `## `, and there each line is one
 paragraph: `**Name**` renders bold italic (the first one carries the footnote
