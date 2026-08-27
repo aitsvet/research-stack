@@ -53,8 +53,6 @@ DEFAULTS = {
     "dup_min_words": 8,
     "dup_shared_words": 3,
     "ref_window": 2,
-    "participles_per_100": 40,
-    "participles_per_para": 3,
     "gloss": [],
     "gloss_chars": 140,
     "participle_patterns": [],
@@ -213,45 +211,6 @@ def check_citations(paras, cfg, add):
                     [ctx(p.text, p.text.find(f"[{n}")), ctx(paras[j].text, paras[j].text.find(f"[{n}"))])
 
 
-PARTICIPLE = re.compile(
-    r"\b[^\W\d_]{3,}?(?:ющ|ущ|ащ|ящ|вш|енн|анн|ённ)"
-    r"(?:ий|ая|ое|ие|его|ему|им|ым|ых|ыми|ую|ом|ей|ей|ей)\b", re.UNICODE)
-# Только возвратные деепричастия: они однозначны, в отличие от форм на -я,
-# которые неотличимы от существительных и прилагательных без разбора.
-GERUND = re.compile(r"\b[^\W\d_]{3,}?(?:вшись|авшись|ившись|[ая]сь)\b", re.UNICODE)
-
-
-def check_participles(paras, cfg, add):
-    """Причастные обороты читаются тяжелее придаточных с «который».
-
-    Считается плотность на сто предложений и отдельно называются абзацы,
-    где оборотов больше порога. Деепричастия ловятся только возвратные.
-    """
-    total, nsent = 0, 0
-    for p in paras:
-        hits = PARTICIPLE.findall(p.text) + GERUND.findall(p.text)
-        n = len(PARTICIPLE.findall(p.text)) + len(GERUND.findall(p.text))
-        total += n
-        nsent += len(sentences(p.text, set(cfg["abbrev"])))
-        if n >= cfg["participles_per_para"]:
-            add("participles", f"{n} in one paragraph", [p.text[:200]])
-    per100 = total * 100.0 / max(nsent, 1)
-    flag = "" if per100 <= cfg["participles_per_100"] else f"  OVER {cfg['participles_per_100']}"
-    add("participles", f"{total} participial turns = {per100:.0f} per 100 sentences{flag}", [])
-
-
-def check_glossing(paras, cfg, add):
-    body = "\n".join(p.text for p in paras)
-    for term in cfg["gloss"]:
-        m = re.search(r"(?<![^\W\d_])" + re.escape(term), body, re.I | re.UNICODE)
-        if not m:
-            continue
-        half = cfg["gloss_chars"] // 2
-        window = body[max(0, m.start() - half):m.end() + half]
-        if "(" not in window and ")" not in window:
-            add("glossing", f"«{term}» first use carries no parenthetical", [ctx(body, m.start())])
-
-
 def check_participles(paras, sents, cfg, add):
     """Count project-defined word forms without carrying language rules in this script."""
     patterns = [re.compile(p, re.I | re.UNICODE) for p in cfg["participle_patterns"]]
@@ -284,6 +243,18 @@ def check_participles(paras, sents, cfg, add):
     for p, hits in crowded:
         add("participles_limit", f"{len(hits)} forms in one paragraph: "
             + ", ".join(hits), [p.text[:200] + ("…" if len(p.text) > 200 else "")])
+
+
+def check_glossing(paras, cfg, add):
+    body = "\n".join(p.text for p in paras)
+    for term in cfg["gloss"]:
+        m = re.search(r"(?<![^\W\d_])" + re.escape(term), body, re.I | re.UNICODE)
+        if not m:
+            continue
+        half = cfg["gloss_chars"] // 2
+        window = body[max(0, m.start() - half):m.end() + half]
+        if "(" not in window and ")" not in window:
+            add("glossing", f"«{term}» first use carries no parenthetical", [ctx(body, m.start())])
 
 
 def main():
@@ -327,9 +298,8 @@ def main():
         "stubs": lambda: check_stubs(prose, cfg, add),
         "punctuation": lambda: check_punctuation(prose, cfg, add),
         "citations": lambda: check_citations(prose, cfg, add),
-        "participles": lambda: check_participles(prose, cfg, add),
-        "glossing": lambda: check_glossing(prose, cfg, add),
         "participles": lambda: check_participles(prose, sents, cfg, add),
+        "glossing": lambda: check_glossing(prose, cfg, add),
     }
     for name, fn in checks.items():
         if a.only and name not in a.only:
