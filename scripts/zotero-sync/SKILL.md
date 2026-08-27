@@ -146,6 +146,21 @@ Zotero DB/profile sync does not move the literature worktree.
 - Copy final `ZOTERO.md` to the other peer only after library manifests match.
 - Do not commit in either repo unless the user explicitly requests it.
 
+## Post-sync recheck and cleanup
+
+A finished run is not a finished job. After any sync or recovery:
+
+1. Run the verification gate below (stopped snapshots, live API spot-check,
+   manifests on both peers diffed clean).
+2. Only after the gate passes, remove transient transfer artefacts:
+   `.sync/replica/` (fetched DB copies), `.sync/candidates/` (base candidates
+   being tested), stray `.sync/ssh-*` control sockets, `/tmp` plans and
+   manifests from the session, plus superseded `.sync/snap*.txt`. Do **not**
+   delete `.sync/base/`, `.sync/pre-fast-forward/`, `zotero.sqlite.prev`,
+   `zotero.sqlite.bak*` or `.sync/storage/` — those are rollback evidence;
+   prune them only by explicit decision, noting SHA-256 first.
+3. Report container end states, unresolved findings, and every file removed.
+
 ## Verification gate
 
 Verify from three independent views:
