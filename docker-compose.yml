@@ -37,6 +37,8 @@ services:
   open-webui:
     image: ghcr.io/open-webui/open-webui:v0.9.5
     container_name: open-webui
+    # Opt in explicitly; the default stack is Zotero only.
+    profiles: ["extra"]
     network_mode: host
     environment:
       # Loopback only — public exposure goes through the system nginx (TLS+auth),
@@ -97,6 +99,8 @@ services:
   searxng:
     image: searxng/searxng:latest
     container_name: searxng
+    # Opt in explicitly; the default stack is Zotero only.
+    profiles: ["extra"]
     network_mode: host
     volumes:
       - ./config/searxng:/etc/searxng:rw
@@ -112,6 +116,8 @@ services:
   mcpo:
     image: ghcr.io/open-webui/mcpo:main
     container_name: mcpo
+    # Opt in explicitly; the default stack is Zotero only.
+    profiles: ["extra"]
     network_mode: host
     volumes:
       - ./config/mcpo/config.json:/app/config.json:ro
@@ -126,6 +132,8 @@ services:
   open-terminal:
     image: ghcr.io/open-webui/open-terminal:slim
     container_name: open-terminal
+    # Opt in explicitly; the default stack is Zotero only.
+    profiles: ["extra"]
     network_mode: host
     environment:
       - OPEN_TERMINAL_API_KEY=${OPEN_TERMINAL_API_KEY}
