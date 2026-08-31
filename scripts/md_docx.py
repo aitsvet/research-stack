@@ -27,10 +27,11 @@ handling: `1. ` stays literal text in an ordinary body paragraph, which is what
 a bibliography wants and why in-body enumerations use `- ` instead.
 
 Front matter is everything before the first `## `, and there each line is one
-paragraph: `**Name**` renders bold italic (the first one carries the footnote
-reference and becomes dc:creator), `**Аннотация**`/`**Abstract**` render bold
-upright as labels, `*text*` renders italic. Adviser lines, Russian and English,
-are lifted out of the body and joined into the single footnote.
+paragraph. `**Name**` renders bold italic and `*text*` renders italic. The first
+name carries the footnote reference when adviser lines are present and becomes
+dc:creator.
+`**Аннотация**`/`**Abstract**` render bold upright as labels. Adviser lines,
+Russian and English, are lifted out of the body and joined into one footnote.
 
 Traps worth knowing:
   * rPr children are order-sensitive: rFonts, b, i, sz. b after i fails schema
@@ -54,6 +55,7 @@ SECT = ('<w:sectPr><w:pgSz w:w="11906" w:h="16838" w:orient="portrait" />'
         '<w:docGrid w:type="default" /></w:sectPr>')
 INDENT = 709            # 1.25 cm first line
 LINE = 360              # 1.5 spacing
+LINE_RULE = 'auto'
 FRONT_LABELS = {'Аннотация', 'Abstract', 'Резюме', 'Summary'}
 FNREF = ('<w:r><w:rPr><w:rStyle w:val="FootnoteReference" />'
          '<w:vertAlign w:val="superscript" /></w:rPr>'
@@ -112,8 +114,9 @@ def runs(text, italic=False):
 
 
 def ppr(before=0, after=0, ind=0, jc='both'):
-    return ('<w:pPr><w:spacing w:before="%d" w:after="%d" w:line="%d" w:lineRule="auto" />'
-            '<w:ind w:firstLine="%d" /><w:jc w:val="%s" /></w:pPr>' % (before, after, LINE, ind, jc))
+    return ('<w:pPr><w:spacing w:before="%d" w:after="%d" w:line="%d" w:lineRule="%s" />'
+            '<w:ind w:firstLine="%d" /><w:jc w:val="%s" /></w:pPr>'
+            % (before, after, LINE, LINE_RULE, ind, jc))
 
 
 def image_runs(name, cx, cy, rid):
@@ -140,6 +143,8 @@ def png_size(path):
 def build(md_path, template, out_path, image_cm):
     src_dir = os.path.dirname(os.path.abspath(md_path))
     lines = io.open(md_path, encoding='utf8').read().split('\n')
+    has_adviser = any(re.match(r'^\*(Научный руководитель|Scientific advis[eo]r):', raw.strip())
+                      for raw in lines)
     zt = zipfile.ZipFile(template)
     rid = re.search(r'Type="[^"]*/image" Target="[^"]*" Id="([^"]+)"',
                     zt.read('word/_rels/document.xml.rels').decode('utf8'))
@@ -170,7 +175,8 @@ def build(md_path, template, out_path, image_cm):
             p = ppr(jc='left') + runs(s)
         elif s.startswith('# '):
             titles += 1
-            p = ppr(before=0 if titles == 1 else 240, ind=0, jc='center') + runs('**' + s[2:] + '**', italic=True)
+            p = ppr(before=0 if titles == 1 else 240, ind=0, jc='center') + runs(
+                '**' + s[2:] + '**', italic=True)
         elif re.match(r'^\*Рис\.', s):
             p = ppr(after=120, ind=0, jc='center') + runs(s)
         elif front and lbl and lbl.group(1) in FRONT_LABELS:
@@ -178,15 +184,19 @@ def build(md_path, template, out_path, image_cm):
         elif front and lbl:
             p = ppr(before=240, ind=0, jc='left') + runs(s, italic=True)
             if not named:
-                p, named = p + FNREF, lbl.group(1)
+                named = lbl.group(1)
+                if has_adviser:
+                    p += FNREF
         elif front and s.startswith('*') and s.endswith('*'):
             p = ppr(ind=0, jc='left') + runs(s)
         elif re.match(r'^## Библиографический', s):
             p = ppr(before=240, ind=0, jc='center') + runs('**' + s[3:] + '**')
         elif s.startswith('### '):
-            p = ppr(before=120, ind=0, jc='left') + runs('**' + s[4:] + '**', italic=True)
+            p = ppr(before=120, ind=0, jc='left') + runs(
+                '**' + s[4:] + '**', italic=True)
         elif s.startswith('## '):
-            p = ppr(before=240, after=120, ind=0, jc='left') + runs('**' + s[3:] + '**', italic=True)
+            p = ppr(before=240, after=120, ind=0, jc='left') + runs(
+                '**' + s[3:] + '**', italic=True)
         elif s.startswith('- '):
             p = ppr(ind=INDENT) + runs('– ' + s[2:])
         else:
