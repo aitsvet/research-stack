@@ -13,8 +13,12 @@ Standing rules and how to start. Everything situational is one hop away:
 
 ```bash
 docker compose up -d
-./scripts/launch_chromium.sh
+./scripts/launch_chromium.sh     # CDP does not come up on its own
 ```
+
+`up -d` starts `zotero` and nothing else — every other service sits behind a profile (`extra`, `tools`) and comes up only when asked for by name. `launch_chromium.sh` must be re-run after every container restart.
+
+Host ports, all loopback-only (nginx template override + `DISABLE_IPV6` for the UI, `allowRemote=false` in `user.js` for the MCP, a cont-init sed patch for selkies, which hardcodes 0.0.0.0 upstream): **8888** Zotero UI (Selkies), **23120** Zotero MCP, **9222** Chromium CDP, **8082** selkies websocket. The container runs `network_mode: host` so CDP on container loopback is reachable from the host. Never disable the selkies service — it leads the desktop session Zotero and Chromium live in, and killing it takes the MCP and CDP with it.
 
 If `claude mcp list` doesn't show `zotero` connected:
 ```bash
@@ -35,7 +39,8 @@ Library sync between peers (one **origin**, any number of replicas): `scripts/sy
 
 - **Compose the existing toolkit before writing anything new.** The catalogue in `SCRIPTS.md` is the toolkit — read it first. Reusable logic belongs here (domain-agnostic); only project DATA (manifests, state files) goes in the project repo, never numbered one-off scripts. If a genuinely missing primitive comes up, generalize it into this repo instead of burying it in a bespoke script. Same rule for installed skills: a skill's own helpers ARE the toolkit — hand-rolling a shell equivalent right after installing it is the same failure.
 - **Keep this stack domain-agnostic.** Scripts and docs here must be parameterised and universal — no corpus/project-specific data (file paths, site names like a particular journal/registry, subject terminology, item keys, one-shot ingest scripts). That belongs in the *project* repo (e.g. `<project>/scripts/`), which may import `zotero_mcp.py` from here. If you find domain specifics leaking in, move them out.
-- Secrets stay in `.env` + `~/.claude.json`, never committed (HTTP-header `${VAR}` substitution is broken in Claude Code).
+- Secrets stay in `.env` + `~/.claude.json`, never committed (HTTP-header `${VAR}` substitution is broken in Claude Code). `.mcp.json` is committed and therefore holds only the secret-free entries (playwright, chrome-devtools); the Zotero entry stays out of the repo for that reason.
+- **This repo is publishable — no personal information, in files or in history.** No usernames, real names, home-dir paths like `/home/<user>`, or personal item titles; the history was scrubbed of these once already, so do not reintroduce them. Use `$HOME` and placeholders in docs and examples, and scan the diff for identifiers before committing. Domain materials — standards, papers, notes — never land here either: they belong in `~/literature/<theme>/`, and this repo carries only the pipeline that processes them.
 - Don't ever launch `/usr/bin/chromium` — the wrapper breaks input. `launch_chromium.sh` already calls the real binary correctly.
 
 ## The two passes
