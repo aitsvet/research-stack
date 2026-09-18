@@ -245,4 +245,22 @@ volumes:
   gptproxy_open-webui:
     external: true
   open-terminal-data:
+  # To point this at an Ollama data dir that already has models pulled
+  # (elsewhere, or from a previous bind-mount setup) instead of starting
+  # empty, precreate the volume with Compose's own labels attached — that's
+  # what makes `docker compose up` treat it as already provisioned instead
+  # of erroring "already exists but was not created by Docker Compose."
+  # Verified: Compose only checks the project+volume labels below, not the
+  # config-hash label it also stamps on volumes it creates itself.
+  #   docker volume create --driver local --opt type=none --opt o=bind \
+  #     --opt device=/path/to/existing/ollama \
+  #     --label com.docker.compose.project=research-stack \
+  #     --label com.docker.compose.volume=ollama_models \
+  #     research-stack_ollama_models
+  # Must run before the first `docker compose ... up -d ollama` in this
+  # checkout — if that volume already exists (auto-created empty by an
+  # earlier `up`), confirm it's empty, then `docker volume rm` it first.
+  # The project-name label must match this checkout's directory name
+  # (research-stack); a differently-named checkout gets Compose's own
+  # empty volume instead, silently.
   ollama_models:
