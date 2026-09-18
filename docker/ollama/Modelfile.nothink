@@ -1,0 +1,3 @@
+FROM qwen3.6:35b
+TEMPLATE """   {{ .System }}
+<think></think>   {{ .Prompt }}   """
