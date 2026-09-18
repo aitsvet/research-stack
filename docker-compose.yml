@@ -32,6 +32,46 @@ services:
     restart: unless-stopped
 
   ############################
+  # Ollama — local GGUF model runtime (GPU), backs Open WebUI alongside
+  # the qwen_auto/DashScope pipe below
+  ############################
+  ollama:
+    image: ollama/ollama:${OLLAMA_DOCKER_TAG:-latest}
+    container_name: ollama
+    # Opt in explicitly; the default stack is Zotero only.
+    profiles: ["extra"]
+    network_mode: host
+    # Keeps up with upstream tool-calling fixes — Qwen models on Ollama have
+    # an active bug history there; see agents-setup/qwen/README.md.
+    pull_policy: always
+    tty: true
+    environment:
+      # Host networking means whatever Ollama binds to is exposed exactly as
+      # configured — pin to loopback per the standing rule below (Ollama's own
+      # default is 0.0.0.0:11434).
+      - OLLAMA_HOST=127.0.0.1:11434
+      # Sized for a 16GB-VRAM card running qwen3.6:35b (~21-23GB weights,
+      # already offloaded) — rationale in agents-setup/qwen/README.md.
+      - OLLAMA_CONTEXT_LENGTH=${OLLAMA_CONTEXT_LENGTH:-32768}
+      - OLLAMA_FLASH_ATTENTION=1
+      - OLLAMA_KV_CACHE_TYPE=q8_0
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
+    volumes:
+      - ollama_models:/root/.ollama
+      # Modelfiles for local variants, e.g. `docker compose exec ollama
+      # ollama create qwen3.6-nothink -f /modelfiles/Modelfile.nothink`
+      - ./docker/ollama:/modelfiles:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: ${OLLAMA_GPU_DRIVER:-nvidia}
+              count: ${OLLAMA_GPU_COUNT:-1}
+              capabilities:
+                - gpu
+    restart: unless-stopped
+
+  ############################
   # Open WebUI — AI chat frontend
   ############################
   open-webui:
@@ -48,6 +88,9 @@ services:
       - WEBUI_URL=${WEBUI_URL:-http://localhost:4096}
       - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
       - WEBUI_AUTH=True
+      # Local Ollama backend (qwen3.6:35b and friends), alongside the
+      # qwen_auto/DashScope pipe below — two backends, one instance.
+      - OLLAMA_BASE_URL=http://127.0.0.1:11434
       # DashScope / Qwen models. These are DEFAULTS for the qwen_auto pipe's
       # valves — Open WebUI stores valve values in its own DB, so changing them
       # here does not touch an already-installed pipe (set those in the UI).
@@ -91,6 +134,7 @@ services:
       - gptproxy_open-webui:/app/backend/data
     depends_on:
       - searxng
+      - ollama
     restart: unless-stopped
 
   ############################
@@ -201,3 +245,4 @@ volumes:
   gptproxy_open-webui:
     external: true
   open-terminal-data:
+  ollama_models:
