@@ -33,7 +33,7 @@ for p in docs:
     # html_md.py emits ![alt]() for a figure it could only describe, not save —
     # an empty-src <img> prints as a broken-image icon, so render the alt as text.
     md = re.sub(r'!\[([^\]]*)\]\(\)', r'*[иллюстрация: \1]*', md)
-    parts.append(markdown.markdown(md, extensions=["tables"]))
+    parts.append(markdown.markdown(md, extensions=["tables", "sane_lists"]))
 body = '<div style="page-break-after:always"></div>'.join(parts)
 out.write_text(f'<!doctype html><html><head><meta charset="utf-8"><style>{css}</style></head>'
                f'<body>{body}</body></html>', encoding="utf-8")
