@@ -10,6 +10,37 @@ Standing rules and how to start. Everything situational is one hop away:
 | `READING.md` | как читать длинные первоисточники, не разнося контекст и не приписывая источнику лишнего |
 | `CLEARANCE.md` | clearing the tracked tree and reachable Git history for publication |
 
+## ⛔ PUBLICATION GATE — MANDATORY ON **EVERY** TOUCH
+
+**Every commit here is a publication act: this repo is public.** A leak is not
+"a secret" — it is *any* value naming a person, a private repo, your
+filesystem, or one private body of work. **There is no such thing as a small
+one, and "the last commit was cleared" is never a reason to skip this.** No
+exceptions, no "I'll check before I push".
+
+1. **Read the entire diff as content, not as code** — `git diff` *and*
+   `git diff --cached`, plus the commit message. Every comment, default,
+   example path, mount, and fixture counts.
+2. **Run the greps; every hit must be explained, never mechanically deleted:**
+   ```bash
+   git diff HEAD | grep -nEi '[0-9a-f]{16,}|(ssh|https?)://[^/ ]*:[^/@ ]*@|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|Bearer [A-Za-z0-9._-]{16,}|BEGIN [A-Z ]*PRIVATE KEY|/home/[a-z]'
+   ```
+3. **A clean grep is NOT clearance** — `CLEARANCE.md` says so outright. For
+   every proper noun, odd path, host, model tag and narrow feature, answer Q1–5
+   of *Distinguishing reusable support from a leak*. If Q4 or Q5 is yes it
+   leaves: parameterize it or move it to the project repo.
+4. **Never point this repo at another repo's docs — not even a public one.** A
+   cross-repo pointer publishes that repo's existence, name and layout, and
+   dangles for every reader who can't follow it. **Inline the substance**; if it
+   is too big to inline, it belongs in the project repo, not in a pointer.
+5. **State the rule, drop the incident.** Library sizes, tunnel/jump/network
+   detail, personal socket-naming conventions and "learned the hard way" war
+   stories describe *your* environment, not the reusable lesson.
+6. **The working copy is not the history.** Once pushed, a value is public and
+   fixing the tip does not unpublish it (`CLEARANCE.md` §*Rewriting findings
+   safely*). **If you pushed a leak, say so at once** instead of quietly
+   patching the next commit.
+
 ## Start the stack
 
 ```bash
@@ -41,7 +72,7 @@ Library sync between peers (one **origin**, any number of replicas): `scripts/sy
 - **Compose the existing toolkit before writing anything new.** The catalogue in `SCRIPTS.md` is the toolkit — read it first. Reusable logic belongs here (domain-agnostic); only project DATA (manifests, state files) goes in the project repo, never numbered one-off scripts. If a genuinely missing primitive comes up, generalize it into this repo instead of burying it in a bespoke script. Same rule for installed skills: a skill's own helpers ARE the toolkit — hand-rolling a shell equivalent right after installing it is the same failure.
 - **Keep this stack domain-agnostic.** Scripts and docs here must be parameterised and universal — no corpus/project-specific data (file paths, site names like a particular journal/registry, subject terminology, item keys, one-shot ingest scripts). That belongs in the *project* repo (e.g. `<project>/scripts/`), which may import `zotero_mcp.py` from here. If you find domain specifics leaking in, move them out.
 - Secrets stay in `.env` + `~/.claude.json`, never committed (HTTP-header `${VAR}` substitution is broken in Claude Code). `.mcp.json` is committed and therefore holds only the secret-free entries (playwright, chrome-devtools); the Zotero entry stays out of the repo for that reason.
-- **This repo is publishable — no personal information, in files or in history.** No usernames, real names, home-dir paths like `/home/<user>`, or personal item titles; the history was scrubbed of these once already, so do not reintroduce them. Use `$HOME` and placeholders in docs and examples, and scan the diff for identifiers before committing. Domain materials — standards, papers, notes — never land here either: they belong in `~/literature/<theme>/`, and this repo carries only the pipeline that processes them. Before publication, follow the scope, distinctions, history checks, and fresh-clone gate in `CLEARANCE.md`.
+- **This repo is publishable — no personal information, in files or in history.** No usernames, real names, home-dir paths like `/home/<user>`, private-repo pointers, or personal item titles; the history was scrubbed of these once already, so do not reintroduce them. Use `$HOME` and placeholders in docs and examples. Domain materials — standards, papers, notes — never land here either: they belong in `~/literature/<theme>/`, and this repo carries only the pipeline that processes them. **Run the publication gate above on every touch**; for the full scope, history checks and fresh-clone release gate, follow `CLEARANCE.md`.
 - Don't ever launch `/usr/bin/chromium` — the wrapper breaks input. `launch_chromium.sh` already calls the real binary correctly.
 
 ## The two passes
