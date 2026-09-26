@@ -41,11 +41,11 @@ Container uses **`network_mode: host`** — every port the container opens is di
 | `scripts/launch_chromium.sh` | yes | Idempotent launcher for the in-container Chromium with CDP |
 | `scripts/apply_config.sh` | yes | Copies Zotero `user.js` into the active profile |
 | `scripts/sync_library.sh` | yes | Two-way library sync between peers — run on the origin (section below) |
-| `scripts/zotero-sync/SKILL.md` | yes | Required operating skill for peer sync, key recovery, manifests, and literature reconciliation |
+| `scripts/zotero-sync/SKILL.md` | yes | Required operating skill for peer sync, key recovery, manifests, and corpus reconciliation |
 | `scripts/snapshot_db.sh` / `place_snapshot.sh` / `merge_replica.py` | yes | Sync building blocks: crash-consistent DB snapshot, verified DB swap, three-way fast-forward classifier |
 | `scripts/library_manifest.sh` | yes | Whole-library manifest (collections + items) as markdown — post-sync verification (section below) |
 | `scripts/` (the rest) | yes | Research discovery/acquisition/extraction pipeline — catalogued in `SCRIPTS.md` |
-| `docker/docconv/` | yes | Image for the `docconv` service: LibreOffice headless for office-document → Markdown conversion, kept off the host. Batch, not a daemon — `docker compose --profile tools run --rm docconv <dir>`; point `CORPUS` at the tree to convert (default `../literature`). |
+| `docker/docconv/` | yes | Image for the `docconv` service: LibreOffice headless for office-document → Markdown conversion, kept off the host. Batch, not a daemon — `docker compose --profile tools run --rm docconv <dir>`; point `CORPUS` at the tree to convert (default `./corpus`, gitignored). |
 | `requirements.txt` | yes | Python deps for the pipeline scripts (`.venv/bin/pip install -r`) |
 | `open-webui/` / `opencode/` / `jupyter/` | yes | Optional appliances: AI front-ends (Open WebUI, OpenCode) and JupyterLab+MCP, each with its own README. `opencode/` and `jupyter/` bring their own compose; Open WebUI runs from the root compose instead — it moved there together with SearXNG, and the appliance copy that stayed behind only clashed over `container_name`. |
 | `user.js` | yes | Zotero MCP plugin prefs — `requireAuth=true`, all write scopes on |
@@ -181,13 +181,13 @@ ssh+rsync, no zotero.org account involved.
 All peers may write, but a Zotero object key is durable identity: item, note,
 attachment and collection keys must never be regenerated during a sync.
 `scripts/sync_library.sh` therefore keeps two **separate** copies under
-`$SYNC_BACKUP_DIR` (default `~/backup/zotero`) and permits whole-snapshot
-fast-forwards only:
+`$SYNC_BACKUP_DIR` (default `.sync/backup`; point it outside the checkout to
+survive losing it) and permits whole-snapshot fast-forwards only:
 
-| Copy | Path | Role |
+| Copy | Path under `$SYNC_BACKUP_DIR` | Role |
 |---|---|---|
-| library backup | `~/backup/zotero/zotero.sqlite` + `storage/` | the backup proper — what you would restore from |
-| common base | `~/backup/zotero/base/zotero.sqlite` | last snapshot **both** peers accepted; the origin of the three-way comparison |
+| library backup | `zotero.sqlite` + `storage/` | the backup proper — what you would restore from |
+| common base | `base/zotero.sqlite` | last snapshot **both** peers accepted; the origin of the three-way comparison |
 
 They are independent files, not one file doing two jobs: advancing the base
 never rewrites the backup, and refreshing the backup never invalidates the base
@@ -217,10 +217,10 @@ Run it ON the origin, once per replica:
 No objects are replayed through MCP and no key map is created. A conflict is
 resolved outside this script (manual choice or Zotero native sync), followed
 by another run once the peers agree. `place_snapshot.sh` retains the replaced
-live DB as `zotero.sqlite.prev`. Upgrading from the older single-copy layout
-(where the base was `~/backup/zotero/zotero.sqlite` itself)? Seed the new base
-once, or the next run finds none and correctly refuses to guess a direction:
-`mkdir -p ~/backup/zotero/base && cp -a ~/backup/zotero/zotero.sqlite ~/backup/zotero/base/zotero.sqlite`
+live DB as `zotero.sqlite.prev`. Upgrading from the older layout? Copy the last
+common base (formerly `.sync/base/zotero.sqlite`) to
+`$SYNC_BACKUP_DIR/base/zotero.sqlite` once, or the next run finds none and
+correctly refuses to guess a direction.
 
 ```bash
 SYNC_REPLICA=user@peer ./scripts/sync_library.sh --dry-run   # plan + volumes

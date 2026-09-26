@@ -2,8 +2,8 @@
 
 Self-contained operating skill for this repo. Read it before synchronising or
 recovering Zotero peers, changing `sync_library.sh`, or reconciling Zotero with a
-literature worktree. Run commands from the research-stack root and use
-`./.venv/bin/python`.
+corpus worktree (`<corpus>` below: the separate repo holding the documents).
+Run commands from the research-stack root and use `./.venv/bin/python`.
 
 ## Non-negotiable invariants
 
@@ -13,7 +13,7 @@ literature worktree. Run commands from the research-stack root and use
   assigns new keys. Never make a key map to paper over that damage.
 - Sync a winning SQLite snapshot whole. `merge_replica.py` classifies state; it
   does not merge rows.
-- `$SYNC_BACKUP_DIR` (default `~/backup/zotero`) holds **two separate copies** of
+- `$SYNC_BACKUP_DIR` (default `.sync/backup`) holds **two separate copies** of
   the DB, and they are not interchangeable:
   - `zotero.sqlite` + `storage/` — the library backup proper, the thing you
     restore from;
@@ -24,9 +24,9 @@ literature worktree. Run commands from the research-stack root and use
   invalidates the base. Unequal non-empty peers without a trustworthy base are a
   conflict, not a direction guess. Because the base advances only after both
   peers pass, *it* is the pre-sync rollback point — the backup is not. Coming
-  from the older one-file layout? Seed it once with
-  `mkdir -p ~/backup/zotero/base && cp -a ~/backup/zotero/zotero.sqlite ~/backup/zotero/base/zotero.sqlite`,
-  or the next run finds no base and correctly refuses to guess.
+  from the older layout? Copy the last common base (formerly
+  `.sync/base/zotero.sqlite`) to `$SYNC_BACKUP_DIR/base/zotero.sqlite` once, or
+  the next run finds no base and correctly refuses to guess.
 - Permit only `equal`, `origin_fast_forward`, or `replica_fast_forward`. If both
   peers contain independent changes, stop before mutation and keep the plan.
 - Touch only the exact `zotero` container. Never use `docker compose up/down` in
@@ -35,21 +35,21 @@ literature worktree. Run commands from the research-stack root and use
   state. Leave a peer stopped only when its post-swap check fails.
 - Keep site-specific hosts/jumps in ignored `.sync/config.env`, never tracked
   scripts. Prefer the configured jump and fall back to ordinary SSH config.
-- PDFs in `literature/` are intentionally gitignored corpus payloads. Sync them
-  out of band; never `git add -f`, weaken `*.pdf`, or commit them. Text/capture
-  sources and `ZOTERO.md` are committed only when explicitly requested.
+- PDFs in `<corpus>/` are intentionally gitignored payloads. Sync them out of
+  band; never `git add -f`, weaken `*.pdf`, or commit them. Text/capture sources
+  and the corpus's library manifest are committed only when explicitly requested.
 
 ## Preflight
 
-1. Read `AGENTS.md`; for corpus files also read `READING.md` and the literature
-   repo's `AGENTS.md`.
+1. Read `AGENTS.md`; for corpus files also read `READING.md` and the corpus
+   repo's own instructions.
 2. Gather SSH, exact-container Docker and scoped write permissions up front.
 3. Check local and remote worktrees. Replica changes are inputs, not debris:
 
    ```bash
    git status --short
    ssh peer 'cd research-stack && git status --short'
-   ssh peer 'cd literature && git status --short'
+   ssh peer 'cd <corpus> && git status --short'
    ```
 
 4. Check running containers and remember Zotero's state. Do not touch unrelated
@@ -78,46 +78,30 @@ keepalives decide before restarting it.
 
 ### Channel discipline
 
-Every rule below exists because ignoring it cost real time on a real sync.
-
-- **Reuse the session you are given.** Before building any connection, look for
-  one that already works: live sockets in `.sync/ssh-*`, any `ControlMaster`
-  sockets your `~/.ssh/config` keeps under `~/.ssh/`, and a plain `ssh <peer>`
-  that already resolves through that config. A socket whose mtime is recent is
-  a working channel — use it instead of constructing a competing one. Do not
-  tear down a route that is currently carrying traffic.
-- **A socket file is not a connection.** A 0-byte socket path with no owning
-  process is stale, and it will silently absorb your next command. Check for the
-  process, not the inode. Stale sockets must be cleared, never half-trusted.
-- **Never delete the jump leg's `ControlMaster` socket.** That is the socket
-  `~/.ssh/config` opens for the *jump* hop, a different channel from the one
-  `sync_library.sh` opens for the replica. Removing it mid-incident removes the
-  only thing still holding the route up. Identify sockets by which leg owns
-  them, not by their name.
-- **Know which leg failed.** `Connection closed by UNKNOWN port 65535` with no
-  prompt is the proxy/jump dropping the TCP session, not the replica refusing
-  you. Distinguish "jump refused auth" from "replica unreachable" before
-  changing anything; they have opposite fixes.
-- **`ControlPersist` is a request, not a guarantee.** An intermediary can cap
-  absolute session lifetime regardless. `ServerAlive*` defeats *idle* timeout
-  only. Expect a long-lived master on a jump route to die between commands, and
-  budget for re-establishing it.
-- **A jump route is a lease, not a fact.** Jump hosts go up and down, and start
-  refusing auth mid-session, with nothing changing on your side. Re-probe
-  cheaply; never assume a route verified an hour ago still holds.
-- **Do not hammer.** Retrying every ~12 s turns a flaky route into a dead one
-  (`MaxStartups`, gateway rate limits) and buries the real error. Space attempts
-  out, and prefer one long-lived master plus a single batched remote command
-  over many short invocations — each `ControlMaster=no` call re-authenticates
+- **Reuse a working channel.** Before opening a connection, check for a live
+  one: a `.sync/ssh-*` socket with an owning process, or a plain `ssh <peer>`
+  that already resolves through your SSH config. Do not open a competing master
+  or tear down a route that is carrying traffic.
+- **A socket file is not a connection.** A control socket with no owning process
+  is stale and absorbs the next command. Check the process, not the path, and
+  clear stale sockets rather than trusting them.
+- **Remove only the sockets this script owns.** `.sync/ssh-*` belongs to
+  `sync_library.sh`; a control socket your SSH config opens for a jump hop is a
+  separate channel, and removing it can drop the route the transfer rides on.
+- **Know which leg failed.** A connection closed before any auth prompt usually
+  comes from the jump or proxy, not the replica. Tell "jump refused" from
+  "replica unreachable" before changing anything; they have opposite fixes.
+- **`ControlPersist` is a request, not a guarantee.** An intermediary may cap
+  session lifetime, and `ServerAlive*` only defeats idle timeouts. Expect a
+  master over a jump to die between commands; re-probe cheaply instead of
+  trusting an earlier check.
+- **Back off.** Tight retry loops trip `MaxStartups` and gateway rate limits and
+  bury the real error. Space attempts out, and prefer one master plus batched
+  remote commands over many short invocations, each of which re-authenticates
   the jump.
-- **Report what finished, by name.** "Copy complete" must say *which* copy: the
-  local build, or the remote transfer. A verified local artefact is not a
-  verified remote one, and rsync exiting 0 is not a substitute for
-  `sha256sum -c` on the far side. Never let the user believe a transfer
-  happened that did not.
-- **Back up, verify, then delete.** Nothing is removed until the replacement is
-  on disk *and* checksum-verified on every host. Irreversible cleanup runs last,
-  after the safety net exists — never in the same breath as creating it.
+- **A transfer is verified on the far side.** rsync exiting 0 is not proof;
+  compare SHA-256 on the receiving host, and delete nothing until the
+  replacement is verified there.
 
 Run on the origin:
 
@@ -190,9 +174,9 @@ that peer stopped and restore from `zotero.sqlite.prev` or the timestamped
 backup — and note the base is its own copy that has not been advanced yet, so it
 still holds the pre-sync state and is the first place to look.
 
-## Literature is a separate sync surface
+## The corpus is a separate sync surface
 
-Zotero DB/profile sync does not move the literature worktree.
+Zotero DB/profile sync does not move the corpus worktree.
 
 - Pull replica-only files to the origin before pushing a manifest; copy explicit
   paths only and never use a directory-wide delete.
@@ -200,7 +184,8 @@ Zotero DB/profile sync does not move the literature worktree.
 - For every Zotero `extra` path, check readable text/capture and ignored original
   PDF separately. Copy the PDF out of band and keep it ignored/uncommitted.
 - Preserve remote untracked files. Never interpret them as cleanup targets.
-- Copy final `ZOTERO.md` to the other peer only after library manifests match.
+- Copy the final corpus manifest to the other peer only after library manifests
+  match.
 - Do not commit in either repo unless the user explicitly requests it.
 
 ## Post-sync recheck and cleanup
@@ -236,7 +221,7 @@ Verify from three independent views:
    ```
 
    Compare content exactly. `items excluding trash + trash` must equal the DB
-   item count. Refresh literature `ZOTERO.md` from the verified manifest. The
+   item count. Refresh the corpus's manifest from the verified one. The
    renderer bypasses inherited proxies for localhost and compacts large note
    bodies before rendering.
 
