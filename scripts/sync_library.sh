@@ -13,6 +13,18 @@
 #   SYNC_SSH_FALLBACK_JUMP  fallback jump; "config" (default) means use the
 #                      replica's ordinary ~/.ssh/config route without -J.
 #   SYNC_SSH_PERSIST   shared SSH connection lifetime (default: 15m).
+#   SYNC_BACKUP_DIR    where the sync keeps its two separate DB copies
+#                      (default: ~/backup/zotero):
+#                        zotero.sqlite       — the library backup proper
+#                        storage/            — its attachment copy
+#                        base/zotero.sqlite  — a SEPARATE copy: the last
+#                                             snapshot both peers accepted
+#                      The two DB copies are independent files. Advancing the
+#                      base never rewrites the backup, and refreshing the
+#                      backup never invalidates the base that classifies the
+#                      next run. The base advances only after both peers
+#                      accept the winner, so until then it is also the
+#                      pre-sync rollback point — there is no third copy.
 #
 # --dry-run copies verified DB snapshots into .sync for comparison, but only
 # pauses replica Zotero briefly and performs no library/profile/container swap.
@@ -28,7 +40,9 @@ fi
 REPLICA="${SYNC_REPLICA-}"
 RROOT="${SYNC_REPLICA_ROOT:-research-stack}"
 SYNC="$ROOT/.sync"
-BASE="$SYNC/base/zotero.sqlite"
+BACKUP_DIR="${SYNC_BACKUP_DIR:-$HOME/backup/zotero}"
+BASE_DIR="$BACKUP_DIR/base"
+BASE="$BASE_DIR/zotero.sqlite"
 KEY="${SYNC_SSH_KEY-}"
 JUMP="${SYNC_SSH_JUMP-}"
 FALLBACK_JUMP="${SYNC_SSH_FALLBACK_JUMP-config}"
@@ -192,8 +206,10 @@ n = con.execute('SELECT COUNT(*) FROM items').fetchone()[0]
 if ok != 'ok': sys.exit(f'integrity_check: {ok}')
 print(f'origin filled: integrity ok, items: {n}')
 PY
-  mkdir -p "$(dirname "$BASE")"
+  mkdir -p "$BACKUP_DIR" "$BASE_DIR"
   cp -a "$ROOT/config/Zotero/zotero.sqlite" "$BASE"
+  rsync -az --delete --info=stats1 \
+    "$ROOT/config/Zotero/storage/" "$BACKUP_DIR/storage/"
   if [ -n "$local_was" ]; then docker start zotero >/dev/null; local_was=""; fi
   echo "==> done"
   exit 0
@@ -251,9 +267,9 @@ if [ "$mode" = replica_fast_forward ]; then
     docker stop zotero >/dev/null
     local_was=1
   fi
-  mkdir -p "$SYNC/pre-fast-forward" "$ROOT/config/Zotero/.snapshot"
-  cp -a "$ROOT/config/Zotero/.snapshot/zotero.sqlite" \
-    "$SYNC/pre-fast-forward/origin.sqlite"
+  # No separate pre-fast-forward copy: $BASE still holds the last state both
+  # peers accepted, so it is the rollback point until the base advances below.
+  mkdir -p "$ROOT/config/Zotero/.snapshot"
   rm -f "$ROOT/config/Zotero/.snapshot/zotero.sqlite"{,-journal,-wal,-shm}
   cp -a "$SYNC/replica/zotero.sqlite" "$ROOT/config/Zotero/.snapshot/zotero.sqlite"
   replica_items="$("$PYTHON" -c "import json; print(json.load(open('$SYNC/plan.json'))['stats']['replica_items'])")"
@@ -297,9 +313,13 @@ phase=place
 rsh "'$RROOT/scripts/place_snapshot.sh' '$want_items'"
 phase=done
 
-# Advance the common ancestor only after both peers accepted the winner.
-mkdir -p "$(dirname "$BASE")"
+# Advance the common ancestor only after both peers accepted the winner. It
+# lands in its own copy under $BASE_DIR, so the backup written above keeps
+# reflecting the library rather than the classification base.
+mkdir -p "$BACKUP_DIR" "$BASE_DIR"
 cp -a "$ROOT/config/Zotero/.snapshot/zotero.sqlite" "$BASE"
+rsync -az --delete --info=stats1 \
+  "$ROOT/config/Zotero/storage/" "$BACKUP_DIR/storage/"
 
 if [ -n "$was_running" ]; then
   echo "==> starting zotero on the replica"

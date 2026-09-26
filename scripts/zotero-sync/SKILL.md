@@ -13,9 +13,20 @@ literature worktree. Run commands from the research-stack root and use
   assigns new keys. Never make a key map to paper over that damage.
 - Sync a winning SQLite snapshot whole. `merge_replica.py` classifies state; it
   does not merge rows.
-- `.sync/base/zotero.sqlite` is the last snapshot accepted by both peers. Unequal
-  non-empty peers without a trustworthy base are a conflict, not a direction
-  guess.
+- `$SYNC_BACKUP_DIR` (default `~/backup/zotero`) holds **two separate copies** of
+  the DB, and they are not interchangeable:
+  - `zotero.sqlite` + `storage/` — the library backup proper, the thing you
+    restore from;
+  - `base/zotero.sqlite` — a distinct copy, the last snapshot **both** peers
+    accepted, and the origin of the three-way comparison.
+
+  Advancing the base never rewrites the backup; refreshing the backup never
+  invalidates the base. Unequal non-empty peers without a trustworthy base are a
+  conflict, not a direction guess. Because the base advances only after both
+  peers pass, *it* is the pre-sync rollback point — the backup is not. Coming
+  from the older one-file layout? Seed it once with
+  `mkdir -p ~/backup/zotero/base && cp -a ~/backup/zotero/zotero.sqlite ~/backup/zotero/base/zotero.sqlite`,
+  or the next run finds no base and correctly refuses to guess.
 - Permit only `equal`, `origin_fast_forward`, or `replica_fast_forward`. If both
   peers contain independent changes, stop before mutation and keep the plan.
 - Touch only the exact `zotero` container. Never use `docker compose up/down` in
@@ -65,6 +76,49 @@ transfer in the same authorized execution context; do not remove an active
 socket. Quiet rsync over a slow jump is not failure—check the process and let
 keepalives decide before restarting it.
 
+### Channel discipline
+
+Every rule below exists because ignoring it cost real time on a real sync.
+
+- **Reuse the session you are given.** Before building any connection, look for
+  one that already works: live sockets in `.sync/ssh-*`, any `ControlMaster`
+  sockets your `~/.ssh/config` keeps under `~/.ssh/`, and a plain `ssh <peer>`
+  that already resolves through that config. A socket whose mtime is recent is
+  a working channel — use it instead of constructing a competing one. Do not
+  tear down a route that is currently carrying traffic.
+- **A socket file is not a connection.** A 0-byte socket path with no owning
+  process is stale, and it will silently absorb your next command. Check for the
+  process, not the inode. Stale sockets must be cleared, never half-trusted.
+- **Never delete the jump leg's `ControlMaster` socket.** That is the socket
+  `~/.ssh/config` opens for the *jump* hop, a different channel from the one
+  `sync_library.sh` opens for the replica. Removing it mid-incident removes the
+  only thing still holding the route up. Identify sockets by which leg owns
+  them, not by their name.
+- **Know which leg failed.** `Connection closed by UNKNOWN port 65535` with no
+  prompt is the proxy/jump dropping the TCP session, not the replica refusing
+  you. Distinguish "jump refused auth" from "replica unreachable" before
+  changing anything; they have opposite fixes.
+- **`ControlPersist` is a request, not a guarantee.** An intermediary can cap
+  absolute session lifetime regardless. `ServerAlive*` defeats *idle* timeout
+  only. Expect a long-lived master on a jump route to die between commands, and
+  budget for re-establishing it.
+- **A jump route is a lease, not a fact.** Jump hosts go up and down, and start
+  refusing auth mid-session, with nothing changing on your side. Re-probe
+  cheaply; never assume a route verified an hour ago still holds.
+- **Do not hammer.** Retrying every ~12 s turns a flaky route into a dead one
+  (`MaxStartups`, gateway rate limits) and buries the real error. Space attempts
+  out, and prefer one long-lived master plus a single batched remote command
+  over many short invocations — each `ControlMaster=no` call re-authenticates
+  the jump.
+- **Report what finished, by name.** "Copy complete" must say *which* copy: the
+  local build, or the remote transfer. A verified local artefact is not a
+  verified remote one, and rsync exiting 0 is not a substitute for
+  `sha256sum -c` on the far side. Never let the user believe a transfer
+  happened that did not.
+- **Back up, verify, then delete.** Nothing is removed until the replacement is
+  on disk *and* checksum-verified on every host. Irreversible cleanup runs last,
+  after the safety net exists — never in the same breath as creating it.
+
 Run on the origin:
 
 ```bash
@@ -83,7 +137,8 @@ The real run must, in order:
    exact DB on the origin;
 7. push the winning storage/profile/snapshot with partial rsync, install it with
    `place_snapshot.sh`, and check integrity plus total item count;
-8. advance `.sync/base` only after both peers pass;
+8. advance the base — `$SYNC_BACKUP_DIR/base/zotero.sqlite`, its own copy —
+   only after both peers pass;
 9. restore the recorded Zotero running states.
 
 First-fill is valid only when one peer truly has no DB. A nearly empty DB created
@@ -130,8 +185,10 @@ Before installing the candidate, require:
 
 Transfer storage without delete, install the exact candidate on each stopped
 peer with `place_snapshot.sh`, compare stopped snapshot hashes/counts, then set
-`.sync/base`. If placement fails, leave that peer stopped and restore from
-`zotero.sqlite.prev` or the timestamped backup.
+the base at `$SYNC_BACKUP_DIR/base/zotero.sqlite`. If placement fails, leave
+that peer stopped and restore from `zotero.sqlite.prev` or the timestamped
+backup — and note the base is its own copy that has not been advanced yet, so it
+still holds the pre-sync state and is the first place to look.
 
 ## Literature is a separate sync surface
 
@@ -156,9 +213,11 @@ A finished run is not a finished job. After any sync or recovery:
    `.sync/replica/` (fetched DB copies), `.sync/candidates/` (base candidates
    being tested), stray `.sync/ssh-*` control sockets, `/tmp` plans and
    manifests from the session, plus superseded `.sync/snap*.txt`. Do **not**
-   delete `.sync/base/`, `.sync/pre-fast-forward/`, `zotero.sqlite.prev`,
-   `zotero.sqlite.bak*` or `.sync/storage/` — those are rollback evidence;
-   prune them only by explicit decision, noting SHA-256 first.
+   delete either copy in `$SYNC_BACKUP_DIR` — `zotero.sqlite` + `storage/` (the
+   backup) or `base/zotero.sqlite` (the common base) — nor
+   `zotero.sqlite.prev`, `zotero.sqlite.bak*` or `.sync/storage/`: those are
+   rollback evidence, and the two copies are not substitutes for each other.
+   Prune them only by explicit decision, noting SHA-256 first.
 3. Report container end states, unresolved findings, and every file removed.
 
 ## Verification gate

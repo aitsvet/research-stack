@@ -180,9 +180,22 @@ ssh+rsync, no zotero.org account involved.
 
 All peers may write, but a Zotero object key is durable identity: item, note,
 attachment and collection keys must never be regenerated during a sync.
-`scripts/sync_library.sh` therefore keeps the last common snapshot in
-`.sync/base/zotero.sqlite` and permits whole-snapshot fast-forwards only. Run
-it ON the origin, once per replica:
+`scripts/sync_library.sh` therefore keeps two **separate** copies under
+`$SYNC_BACKUP_DIR` (default `~/backup/zotero`) and permits whole-snapshot
+fast-forwards only:
+
+| Copy | Path | Role |
+|---|---|---|
+| library backup | `~/backup/zotero/zotero.sqlite` + `storage/` | the backup proper — what you would restore from |
+| common base | `~/backup/zotero/base/zotero.sqlite` | last snapshot **both** peers accepted; the origin of the three-way comparison |
+
+They are independent files, not one file doing two jobs: advancing the base
+never rewrites the backup, and refreshing the backup never invalidates the base
+that classifies the next run. The base is only advanced after both peers pass,
+so until then it also serves as the origin's pre-fast-forward rollback point —
+there is no third copy.
+
+Run it ON the origin, once per replica:
 
 1. stops zotero on the replica (its writes pause safely; the replica's MCP is
    down for the duration) and fetches its DB; if the origin has no DB yet, it
@@ -204,8 +217,10 @@ it ON the origin, once per replica:
 No objects are replayed through MCP and no key map is created. A conflict is
 resolved outside this script (manual choice or Zotero native sync), followed
 by another run once the peers agree. `place_snapshot.sh` retains the replaced
-live DB as `zotero.sqlite.prev`; the origin also retains its pre-fast-forward
-snapshot in `.sync/pre-fast-forward/origin.sqlite`.
+live DB as `zotero.sqlite.prev`. Upgrading from the older single-copy layout
+(where the base was `~/backup/zotero/zotero.sqlite` itself)? Seed the new base
+once, or the next run finds none and correctly refuses to guess a direction:
+`mkdir -p ~/backup/zotero/base && cp -a ~/backup/zotero/zotero.sqlite ~/backup/zotero/base/zotero.sqlite`
 
 ```bash
 SYNC_REPLICA=user@peer ./scripts/sync_library.sh --dry-run   # plan + volumes
