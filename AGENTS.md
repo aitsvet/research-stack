@@ -21,9 +21,14 @@ exceptions, no "I'll check before I push".
 1. **Read the entire diff as content, not as code** — `git diff` *and*
    `git diff --cached`, plus the commit message. Every comment, default,
    example path, mount, and fixture counts.
-2. **Run the greps; every hit must be explained, never mechanically deleted:**
+2. **Run the greps over the diff *and* the message; every hit must be
+   explained, never mechanically deleted.** The last three alternatives catch
+   home-relative and sibling-checkout paths — the usual shape of a private-repo
+   pointer:
    ```bash
-   git diff HEAD | grep -nEi '[0-9a-f]{16,}|(ssh|https?)://[^/ ]*:[^/@ ]*@|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|Bearer [A-Za-z0-9._-]{16,}|BEGIN [A-Z ]*PRIVATE KEY|/home/[a-z]'
+   MSG='<commit message>'
+   { git diff HEAD; printf '%s\n' "$MSG"; } \
+     | grep -nEi '[0-9a-f]{16,}|(ssh|https?)://[^/ ]*:[^/@ ]*@|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|Bearer [A-Za-z0-9._-]{16,}|BEGIN [A-Z ]*PRIVATE KEY|/home/[a-z]|~/[a-z]|\.\./[a-z]'
    ```
 3. **A clean grep is NOT clearance** — `CLEARANCE.md` says so outright. For
    every proper noun, odd path, host, model tag and narrow feature, answer Q1–5

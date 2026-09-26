@@ -12,3 +12,4 @@ pdfs/
 jupyter/.env
 opencode/.env
 opencode/.env.telegram
+/corpus/

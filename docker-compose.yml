@@ -217,7 +217,7 @@ services:
   # One-shot batch converter, not a daemon. Keeps LibreOffice off the host.
   #   docker compose --profile tools run --rm docconv /corpus/<subdir> --dry-run
   #   docker compose --profile tools run --rm docconv /corpus/<subdir>
-  # CORPUS points at the document tree to convert (default: ./corpus).
+  # CORPUS points at the document tree to convert (default: ./corpus, ignored).
   docconv:
     build: ./docker/docconv
     image: research-stack/docconv:latest
