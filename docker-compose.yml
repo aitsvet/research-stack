@@ -42,7 +42,8 @@ services:
     profiles: ["extra"]
     network_mode: host
     # Keeps up with upstream tool-calling fixes — Qwen models on Ollama have
-    # an active bug history there; see agents-setup/qwen/README.md.
+    # an active bug history there, so never pin the tag on a model you drive
+    # tools with.
     pull_policy: always
     tty: true
     environment:
@@ -50,8 +51,10 @@ services:
       # configured — pin to loopback per the standing rule below (Ollama's own
       # default is 0.0.0.0:11434).
       - OLLAMA_HOST=127.0.0.1:11434
-      # Sized for a 16GB-VRAM card running qwen3.6:35b (~21-23GB weights,
-      # already offloaded) — rationale in agents-setup/qwen/README.md.
+      # Default sizing for a 16GB-VRAM card running qwen3.6:35b (~23GB of
+      # weights, so it is partially offloaded). q8_0 KV + flash attention buy
+      # the headroom that costs some quality; raise the context only after
+      # reading actual usage back from `ollama ps`.
       - OLLAMA_CONTEXT_LENGTH=${OLLAMA_CONTEXT_LENGTH:-32768}
       - OLLAMA_FLASH_ATTENTION=1
       - OLLAMA_KV_CACHE_TYPE=q8_0
