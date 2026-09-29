@@ -41,3 +41,8 @@ user_pref("extensions.zotero.zotero-mcp-plugin.text.preserveFormatting",        
 user_pref("extensions.zotero.zotero-mcp-plugin.text.preserveHeadings",          true);
 user_pref("extensions.zotero.zotero-mcp-plugin.text.preserveLists",             true);
 user_pref("extensions.zotero.zotero-mcp-plugin.ui.includeMetadata",             true);
+
+// === Zotero local API (:23119) ===
+// Read-only REST view of the library; scripts/library_manifest.sh depends on it.
+// The connector server it rides on binds loopback only.
+user_pref("extensions.zotero.httpServer.localAPI.enabled", true);

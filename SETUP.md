@@ -48,7 +48,7 @@ Container uses **`network_mode: host`** — every port the container opens is di
 | `docker/docconv/` | yes | Image for the `docconv` service: LibreOffice headless for office-document → Markdown conversion, kept off the host. Batch, not a daemon — `docker compose --profile tools run --rm docconv <dir>`; point `CORPUS` at the tree to convert (default `./corpus`, gitignored). |
 | `requirements.txt` | yes | Python deps for the pipeline scripts (`.venv/bin/pip install -r`) |
 | `open-webui/` / `opencode/` / `jupyter/` | yes | Optional appliances: AI front-ends (Open WebUI, OpenCode) and JupyterLab+MCP, each with its own README. `opencode/` and `jupyter/` bring their own compose; Open WebUI runs from the root compose instead — it moved there together with SearXNG, and the appliance copy that stayed behind only clashed over `container_name`. |
-| `user.js` | yes | Zotero MCP plugin prefs — `requireAuth=true`, all write scopes on |
+| `user.js` | yes | Zotero prefs — MCP plugin (`requireAuth=true`, all write scopes on) and the local API on :23119 that `library_manifest.sh` reads |
 | `.env` | **no** | Real secrets: web-UI password, Zotero MCP token |
 | `config/` | **no** | Zotero profile, library, attachments, installed `.xpi` plugins |
 
