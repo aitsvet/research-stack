@@ -24,7 +24,7 @@ manifest.json: list of entries. Common fields:
 Per kind:
   arxiv     arxiv: "2503.09089"           (title/creators/date auto from Atom API)
   pdfurl    pdf_url: public PDF URL        + title/creators/date/venue/doi/extra
-  localpdf  pdf_path: /abs/local.pdf       + title/... (needs --serve-ip)
+  localpdf  pdf_path: file under --pdfdir (or absolute) + title/... (needs --serve-ip)
   web       url: page URL (rendered via fetch_pdf.sh; live page attached as snapshot)
   meta      (no full text; metadata-only item)        + title/creators/...
 Metadata for non-arxiv kinds: title, date, creators [[last,first],...], venue,
@@ -137,6 +137,7 @@ def main():
             title = e.get("title"); date = e.get("date"); venue = e.get("venue")
             creators = e.get("creators", []); doi = e.get("doi"); extra = e.get("extra")
             url = e.get("url"); pdf_url = e.get("pdf_url"); pdf_path = e.get("pdf_path")
+            pdf_path = pdf_path and os.path.join(a.pdfdir, pdf_path)
 
             if kind == "arxiv":
                 m = arxiv_meta(e["arxiv"])
@@ -207,7 +208,7 @@ def main():
             # ---- note + ingest copy ----
             if md and os.path.exists(md):
                 dest = os.path.join(a.notesdir, key + ".md")
-                shutil.copyfile(md, dest); rec["md"] = dest; rec["md_bytes"] = os.path.getsize(md)
+                shutil.copyfile(md, dest); rec["md"] = os.path.relpath(dest, a.notesdir); rec["md_bytes"] = os.path.getsize(md)
                 try:
                     add_note_file(mcp, key, md, title[:140], tags=["markdown-extract"])
                     rec["note"] = "ok"
