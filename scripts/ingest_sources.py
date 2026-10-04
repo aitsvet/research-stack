@@ -40,6 +40,7 @@ import xml.etree.ElementTree as ET
 ZS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ZS, "scripts"))
 from zotero_mcp import MCP, add_note_file, import_file, import_local_files, item_key, result_text  # noqa
+import acqlog  # noqa
 
 EXTRACT = os.path.join(ZS, "scripts", "extract_texts.py")
 FETCHPDF = os.path.join(ZS, "scripts", "fetch_pdf.sh")
@@ -230,6 +231,16 @@ def main():
                 if r.get("key") == key:
                     r["pdf"] = "attached" if ok else "attach-fail"
         save()
+
+    for e in entries:
+        r = state.get(e["id"], {})
+        if r.get("key"):
+            src = e.get("pdf_url") or e.get("url") or (
+                "https://arxiv.org/abs/" + e["arxiv"] if e.get("arxiv") else None)
+            acqlog.record(zotero=r["key"], title=e.get("title"), source=src, doi=e.get("doi"),
+                          arxiv=e.get("arxiv"), method=e.get("kind"),
+                          outcome=("error: " + r["error"]) if r.get("error") else "ok",
+                          extractor="pymupdf4llm" if r.get("md") else None)
 
     print("\n==== SUMMARY ====")
     for e in entries:
