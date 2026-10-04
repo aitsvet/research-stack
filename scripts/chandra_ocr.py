@@ -28,6 +28,8 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 import fitz  # PyMuPDF
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import acqlog
 
 # Verbatim from upstream chandra/prompts.py. The model was trained against
 # this exact wording; do not paraphrase.
@@ -176,6 +178,8 @@ def main():
     with open(out_path, "w", encoding="utf-8") as f:
         f.write("\n\n" + "\n\n".join(pages_md) + "\n")
     print(f"[chandra] wrote {out_path} ({len(pages_md)} pages)", file=sys.stderr)
+    acqlog.record(path=a.pdf, extractor="chandra", text=out_path, pages=len(pages_md),
+                  ocr_failed=sum("OCR FAILED" in p for p in pages_md) or None)
 
 
 if __name__ == "__main__":

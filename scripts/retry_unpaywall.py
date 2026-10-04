@@ -17,6 +17,7 @@ Env:
 import json, urllib.request, urllib.parse, os, sys
 
 from zotero_mcp import MCP, result_json
+import acqlog
 
 EMAIL = os.environ.get("UNPAYWALL_EMAIL") or os.environ.get("OPENALEX_EMAIL") or os.environ.get("ZOTERO_USER_EMAIL")
 if not EMAIL:
@@ -97,6 +98,8 @@ def main():
         updates.append({"key": key, "outcome": "OK" if attached else "all_failed", "attempts": attempt_log})
     with open(out_path,"w") as f:
         json.dump(updates, f, ensure_ascii=False, indent=2)
+    for u in updates:
+        acqlog.record(zotero=u["key"], outcome=u["outcome"], attempts=u.get("attempts"), method="oa")
     print(f"\nWrote {out_path}")
     n_ok = sum(1 for u in updates if u["outcome"]=="OK")
     print(f"{n_ok}/{len(updates)} now acquired via Unpaywall fallback")
