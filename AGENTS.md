@@ -8,6 +8,7 @@ Standing rules and how to start. Everything situational is one hop away:
 | `ROUTES.md` | a source won't come out — host routes, bot-walls, lookup playbooks, discovery-API mechanics |
 | `SETUP.md` | architecture, troubleshooting, rationale, and writing to Zotero over the MCP |
 | `READING.md` | как читать длинные первоисточники, не разнося контекст и не приписывая источнику лишнего |
+| `EXTRACT.md` | корпус как зеркало Zotero: что версионируется, как извлекать текст (текстовый слой, OCR, office), проверка полноты и сверка зеркала |
 | `CLEARANCE.md` | clearing the tracked tree and reachable Git history for publication |
 
 ## ⛔ PUBLICATION GATE — MANDATORY ON **EVERY** TOUCH
