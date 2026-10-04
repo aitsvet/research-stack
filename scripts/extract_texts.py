@@ -43,6 +43,18 @@ ZSTORE  = os.environ.get("ZOTERO_STORAGE",
 DISC    = os.environ.get("DISCOVERY_OUT", os.path.expanduser("~/research-stack/.discovery"))
 OUTDIR  = os.path.join(DISC, "text")
 
+
+def _portable(p):
+    """Manifest paths must not carry the host's home: storage-relative for
+    Zotero files, `~/`-relative otherwise."""
+    if not p:
+        return p
+    ap = os.path.abspath(p)
+    if ap.startswith(os.path.abspath(ZSTORE) + os.sep):
+        return "storage/" + os.path.relpath(ap, ZSTORE)
+    home = os.path.expanduser("~")
+    return "~" + ap[len(home):] if ap.startswith(home + os.sep) else p
+
 # Completeness floor: a text layer averaging fewer characters per page than this is
 # a scan, a cover-only layer or a failed extraction, not a readable paper.
 MIN_CHARS_PER_PAGE = 400
@@ -325,7 +337,7 @@ def extract_item(key, att_keys, title, max_chars=None):
         pdf = find_pdf(ak)
         if pdf:
             info = extract_pdf_text(pdf, out_path, max_chars)
-            return {"key": key, "src": "pdftotext", "att": ak, "pdf": pdf, "title": title, **info}
+            return {"key": key, "src": "pdftotext", "att": ak, "pdf": _portable(pdf), "title": title, **info}
     for ak in att_keys:
         ft = find_ft_cache(ak)
         if ft:
@@ -338,7 +350,7 @@ def extract_item(key, att_keys, title, max_chars=None):
         if h:
             info = extract_flat_text(html_text(h), out_path, "html", max_chars)
             if info["size"] > 0:
-                return {"key": key, "src": "html", "att": ak, "html": h, "title": title, **info}
+                return {"key": key, "src": "html", "att": ak, "html": _portable(h), "title": title, **info}
     # Nothing extractable. Preserve any existing .txt (may have been placed manually
     # by an out-of-band extractor such as a .docx converter).
     if os.path.exists(out_path) and os.path.getsize(out_path) > 0:

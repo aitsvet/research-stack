@@ -446,7 +446,7 @@ def main():
     with open(os.path.join(OUTDIR, "summary.md"), "w") as f:
         f.write("# Discovery pass summary\n\n")
         for tid, ttl, n, p in summary:
-            f.write(f"- **{tid}** {ttl}: {n} candidates → `{p}`\n")
+            f.write(f"- **{tid}** {ttl}: {n} candidates → `{os.path.basename(p)}`\n")
     print("done", file=sys.stderr)
 
 if __name__ == "__main__":
