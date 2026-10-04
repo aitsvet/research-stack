@@ -36,6 +36,7 @@ Env:
   DISCOVERY_OUT     output dir parent (default ~/research-stack/.discovery).
 """
 import json, os, re, sys, subprocess, glob
+import acqlog
 
 SEP_DASHES = 48  # marker-compatible page rule width
 ZSTORE  = os.environ.get("ZOTERO_STORAGE",
@@ -322,6 +323,8 @@ def cmd_md(argv):
         os.makedirs(outdir, exist_ok=True)
         stem = os.path.splitext(os.path.basename(pdf))[0]
         out_path = os.path.join(outdir, stem + args.suffix)
+        acqlog.record(path=pdf, extractor="text-layer", text=out_path,
+                      pages=len(re.findall(r"^\{\d+\}-{48}$", md, re.M)) or None)
         with open(out_path, "w") as f:
             f.write(md)
         n_ok += 1
@@ -384,6 +387,11 @@ def _run(entries, manifest_path, prev, max_chars):
         manifest.append(e); _report(e)
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
+    for m in manifest:
+        acqlog.record(zotero=m["key"], title=m.get("title"), attachment=m.get("att"),
+                      extractor=m.get("extractor") or m.get("src"), pages=m.get("pages"),
+                      chars=m.get("chars"), complete=m.get("complete"), flags=m.get("flags"),
+                      stored=m.get("pdf") or m.get("html"))
     n_ok = sum(1 for m in manifest if (m.get("size") or 0) > 0)
     bad = [m for m in manifest if m.get("complete") is False]
     print(f"\n{n_ok}/{len(manifest)} items have text extracted → {OUTDIR}")

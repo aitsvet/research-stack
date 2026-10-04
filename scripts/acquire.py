@@ -19,6 +19,7 @@ Env:
 import json, os, sys, re
 
 from zotero_mcp import MCP, result_json
+import acqlog
 
 DISC = os.environ.get("DISCOVERY_OUT", os.path.expanduser("~/research-stack/.discovery"))
 os.makedirs(DISC, exist_ok=True)
@@ -90,6 +91,10 @@ def main():
     # Write log
     with open(log_path,"w") as f:
         json.dump(log, f, ensure_ascii=False, indent=2)
+    for r in log:
+        acqlog.record(zotero=r["key"], title=r.get("title"), source=r.get("url"),
+                      attachment=r.get("attach"), oa_status=r.get("oa_status"),
+                      outcome=r["result"], method="oa")
     n_ok = sum(1 for r in log if r["result"].startswith("OK"))
     n_skip = sum(1 for r in log if r["result"].startswith("skip"))
     print(f"\n{n_ok} acquired, {n_skip} skipped, {len(log)-n_ok-n_skip} failed of {len(log)} items")
