@@ -35,7 +35,8 @@ Zotero, а если его нет — путь в корпусе. Поля: `pat
 
 Скрипты дописывают его сами, если задана переменная
 `ACQUISITION_LOG=<корпус>/acquisition_log.json`: `acquire.py`,
-`retry_unpaywall.py`, `extract_texts.py` (оба режима), `chandra_ocr.py`.
+`retry_unpaywall.py`, `extract_texts.py` (оба режима), `chandra_ocr.py`,
+`ingest_sources.py`, `discover.py --dois`.
 Помощник — `scripts/acqlog.py`. Рабочие файлы прогонов (логи добычи и
 повторов, манифесты текстов) остаются в каталоге `DISCOVERY_OUT` и в корпус
 не копируются: всё, что в них есть о происхождении источника, уже лежит в

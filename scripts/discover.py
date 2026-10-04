@@ -38,6 +38,7 @@ from datetime import datetime, timezone
 from xml.etree import ElementTree as ET
 
 from zotero_mcp import MCP
+import acqlog
 
 EMAIL  = os.environ.get("OPENALEX_EMAIL") or os.environ.get("ZOTERO_USER_EMAIL", "")
 UA     = f"research-stack/1.0 (mailto:{EMAIL})" if EMAIL else "research-stack/1.0"
@@ -391,6 +392,10 @@ def doi_list_mode(dois_path, collection_key, topic_id):
                 att_key = ""
         results.append({"doi": doi, "itemKey": item_key, "attachmentKey": att_key,
                          "title": c["title"][:80], "oa_url": c["oa_url"]})
+        if item_key:
+            acqlog.record(zotero=item_key, title=c["title"], doi=doi, source=c["oa_url"],
+                          attachment=att_key, method="doi",
+                          outcome="ok" if att_key else ("no attachment" if c["oa_url"] else "no_oa_url"))
         print(f"  [{doi}] item={item_key or '!FAIL'} att={att_key or '-'} | {c['title'][:60]}", file=sys.stderr)
     out_path = os.path.join(OUTDIR, f"doi_ingest_{collection_key}.json")
     with open(out_path, "w") as f:

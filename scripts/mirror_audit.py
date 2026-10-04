@@ -9,8 +9,10 @@ and reports every discrepancy, in both directions:
   1. pointer → missing   record's `extra` names a corpus path that is absent
   2. orphan key          corpus file named by a Zotero key that does not exist
                          (or sits in the trash)
-  3. unmirrored folder   top-level corpus folder no record points into and no
-                         file in it carries a live key
+  3. unmirrored files    source files at any depth that no record covers: not
+                         pointed to (nor a parent folder, nor a same-stem
+                         sibling such as x.pdf for x.md) and not named by a live
+                         key; reported grouped by folder
   4. collection gaps     records of a collection that the corpus mirrors mostly
                          (share >= --pool-below) but that have no file there
      discovery pools     collections mirrored below that share are candidate
@@ -23,6 +25,9 @@ Usage:
           beside this repo). Opened immutable, so a running Zotero is fine.
   --name  how records spell the corpus in `extra` (default: the folder name).
   --pool-below  share under which a collection counts as a discovery pool (0.5).
+  --skip  extra glob of non-source files (repeatable). Always skipped: README.md,
+          *.json, *.tsv, topic_*.md, abstracts*.md, coverage.md, summary.md,
+          dotfiles, and root-level files.
 
 Exit status 1 when any discrepancy is found, so it can gate a commit.
 """
@@ -57,6 +62,7 @@ def main():
     ap.add_argument('--name')
     ap.add_argument('--out')
     ap.add_argument('--pool-below', type=float, default=0.5)
+    ap.add_argument('--skip', action='append', default=[])
     a = ap.parse_args()
     root = os.path.abspath(a.corpus)
     name = a.name or os.path.basename(root.rstrip('/'))
@@ -102,19 +108,48 @@ def main():
             else:
                 missing.append((by_iid[iid], live[by_iid[iid]][1], p))
 
-    orphans, keyed_dirs = [], set()
+    orphans = []
     for f in files:
         k = file_key(f)
         if not k:
             continue
         if k in live:
-            mirrored.add(live[k][0]); keyed_dirs.add(f.split('/')[0])
+            mirrored.add(live[k][0])
         else:
             orphans.append((f, 'trash' if k in trashed else 'absent'))
 
-    pointed_dirs = {p.split('/')[0] for ps in pointers.values() for p in ps}
-    tops = sorted({f.split('/')[0] for f in files if '/' in f})
-    unmirrored = [t for t in tops if t not in pointed_dirs and t not in keyed_dirs]
+    # files no record covers, at any depth
+    import fnmatch
+    skip = ['README.md', '*.json', '*.tsv', 'topic_*.md', 'abstracts*.md',
+            'coverage.md', 'summary.md', '*.py', '*.sh', '.*'] + a.skip
+    live_ptrs = {p for iid, ps in pointers.items() if iid in by_iid for p in ps
+                 if p in fileset or p in dirset}
+    stem = lambda f: os.path.splitext(f)[0]
+    ptr_stems = {stem(p) for p in live_ptrs}
+    def covered(f):
+        if f in live_ptrs or stem(f) in ptr_stems:
+            return True
+        parts = f.split('/')
+        if any('/'.join(parts[:i]) in live_ptrs for i in range(1, len(parts))):
+            return True
+        k = file_key(f)
+        return bool(k and k in live)
+    unc = defaultdict(list)
+    total = defaultdict(int); bad = defaultdict(int)   # per folder, whole subtree
+    for f in files:
+        if '/' not in f or any(fnmatch.fnmatch(os.path.basename(f), g) for g in skip):
+            continue
+        ok = covered(f)
+        parts = f.split('/')[:-1]
+        for i in range(1, len(parts) + 1):
+            d = '/'.join(parts[:i]); total[d] += 1; bad[d] += (not ok)
+        if not ok:
+            unc[os.path.dirname(f)].append(os.path.basename(f))
+    # collapse: a folder whose whole subtree is uncovered is one line, shown at
+    # its topmost such folder; partly covered folders list their own files
+    full = {d for d in total if bad[d] == total[d]}
+    top_full = {d for d in full if not any(d.startswith(x + '/') for x in full)}
+    unmirrored = sorted(top_full | {d for d in unc if d not in full})
 
     # collections the corpus mirrors at least in part
     coll = defaultdict(set); cname = {}
@@ -140,8 +175,17 @@ def main():
     L += [f'- `{k}` {t[:70]} → `{p}`' for k, t, p in sorted(missing, key=lambda x: x[2])] or ['none']
     L += ['', f'## 2. Corpus files named by a key without a live record ({len(orphans)})', '']
     L += [f'- `{f}` ({why})' for f, why in sorted(orphans)] or ['none']
-    L += ['', f'## 3. Top-level folders with no record pointing in ({len(unmirrored)})', '']
-    L += [f'- `{t}/`' for t in unmirrored] or ['none']
+    n_unc = sum(len(v) for v in unc.values())
+    L += ['', f'## 3. Source files no record covers ({n_unc}; {len(unmirrored)} places)', '']
+    for d in unmirrored:
+        if d in top_full:
+            L.append(f'- `{d}/` — whole folder, {total[d]} files')
+            continue
+        names = sorted({stem(n) for n in unc[d]})
+        L.append(f'- `{d}/` — {len(unc[d])} files: ' + ', '.join(f'`{n}`' for n in names[:6])
+                 + (f', … +{len(names) - 6}' if len(names) > 6 else ''))
+    if not unmirrored:
+        L.append('none')
     L += ['', f'## 4. Collections mirrored in part ({len(gaps)})', '']
     if not gaps:
         L.append('none')
