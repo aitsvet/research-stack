@@ -1,4 +1,10 @@
 # Office documents (.rtf/.doc/.docx/.odt) -> Markdown.
+# Calc and Impress ride along: Calc recalculates spreadsheets openpyxl wrote
+# (formulas without cached values), Impress converts presentations; both run
+# in the container rather than on the host, e.g.:
+#   docker compose --profile tools run --rm --entrypoint soffice docconv \
+#     --headless -env:UserInstallation=file:///tmp/loprofile \
+#     --convert-to xlsx --outdir /corpus/out /corpus/<file>.xlsx
 # LibreOffice lives here rather than on the host; the converter itself needs
 # only bs4, so this image stays free of the PDF/OCR dependency stack.
 # p7zip/unzip ride along because document bundles arrive as nested .zip/.rar
@@ -18,6 +24,8 @@ RUN sed -i 's/^Components: .*/Components: main contrib non-free/' \
 RUN apt-get update && apt-get install -y --no-install-recommends \
         unrar \
         libreoffice-writer-nogui \
+        libreoffice-calc-nogui \
+        libreoffice-impress-nogui \
         fonts-liberation \
         fonts-dejavu-core \
         python3 \
