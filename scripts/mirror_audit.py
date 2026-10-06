@@ -81,20 +81,38 @@ def main():
         (trashed.add(key) if gone else live.__setitem__(key, (iid, title or '')))
 
     # pointers: "<name>/<path>" anywhere in `extra`, path runs to end of line
-    # and stops before a " — " comment (a plain hyphen occurs inside file names)
+    # and may be followed by a " — " comment. A file name can itself contain
+    # " — " (e.g. "GFMA — Impact of DLT.md"), so the line is resolved against
+    # the corpus below: the longest " — "-prefix that exists wins; if none
+    # exists, the text before the first " — " is the (missing) target.
     ptr_re = re.compile(re.escape(name) + r'/([^\n]+)')
-    pointers = defaultdict(list)   # itemID -> [rel paths]
+    raw_pointers = defaultdict(list)   # itemID -> [raw remainder of the line]
     for iid, extra in db.execute("""
         select d.itemID, v.value from itemData d join itemDataValues v using(valueID)
         join fields f using(fieldID) where f.fieldName='extra'"""):
         for m in ptr_re.finditer(extra):
-            p = re.split(r'\s+—\s+', m.group(1).strip())[0].strip().rstrip('/')
-            pointers[iid].append(p)
+            raw_pointers[iid].append(m.group(1).strip())
 
     files = corpus_files(root)
     fileset = set(files)
     dirset = {os.path.dirname(f) for f in files}
     dirset |= {'/'.join(d.split('/')[:i]) for d in list(dirset) for i in range(1, d.count('/') + 1)}
+
+    def resolve(raw):
+        parts = re.split(r'\s+—\s+', raw)
+        # re.split drops the separators; rebuild prefixes with the original text
+        seps = re.findall(r'\s+—\s+', raw)
+        cands = []
+        for i in range(len(parts), 0, -1):
+            cands.append((''.join(parts[j] + (seps[j] if j < i - 1 else '') for j in range(i))).strip().rstrip('/'))
+        for c in cands:
+            if c in fileset or c in dirset:
+                return c
+        return parts[0].strip().rstrip('/')
+
+    pointers = defaultdict(list)   # itemID -> [rel paths]
+    for iid, raws in raw_pointers.items():
+        pointers[iid] = [resolve(r) for r in raws]
 
     by_iid = {iid: k for k, (iid, _) in live.items()}
     mirrored = set()               # itemIDs that have something in the corpus
