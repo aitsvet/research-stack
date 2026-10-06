@@ -79,6 +79,22 @@ by lint before eyeballs.
   20x11.25in slide, quarter-point sizes (18.75/20.25/21.75 = px*0.75),
   five-digit line-spacing percentages, every anchor `t`, bare `normAutofit`.
   Such a deck needs observe + lint before anything is added to it.
+- **Scope and template fidelity.** Add only the slides the author names. When a
+  deck names a source slide, clone that slide's layout and retained artwork,
+  including sidebars, pictures and numbers; inspect the result in native PPTX.
+  Preserve the author's edits. Visible references and speaker notes are content:
+  add them only when requested, and remove notes parts if asked to remove notes.
+- **PowerPoint font fidelity.** Inspect the actual typeface names, target-machine
+  font availability and embedded fonts before diagnosing uneven letter spacing.
+  Font substitution changes glyph widths. Keep each uniformly formatted word or
+  line in one run: imported edits can split a word into runs with inconsistent
+  language tags and break shaping across boundaries. Set language and Latin,
+  East Asian and complex-script font slots consistently on generated runs;
+  preserve intentional tracking. If uppercase headings still show uneven gaps,
+  test explicit character spacing and disable pair kerning on those runs. A
+  clean lint or non-Office render cannot prove that Microsoft PowerPoint uses
+  the intended font. Verify in the target Office version or supply the exact
+  licensed fonts for installation.
 
 ## Files
 
