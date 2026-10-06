@@ -5,6 +5,7 @@
 #   md_pdf.sh notes.md out.pdf
 #   md_pdf.sh <dir> [out.pdf]       -> all *.md in the dir (sorted) into one
 #                                      PDF, page break between documents
+# MD_PDF_CSS appends print CSS, e.g. MD_PDF_CSS='@page{size:A4 landscape}body{max-width:none}'
 # Relative image links resolve against the md's directory: it is served on
 # 127.0.0.1:${MD_PDF_PORT:-8377} for the duration of the print (the container
 # shares the host network). Wraps fetch_pdf.sh with images ON and no md
@@ -27,6 +28,7 @@ docs = sorted(src.glob("*.md")) if src.is_dir() else [src]
 css = ("body{font-family:sans-serif;max-width:850px;margin:auto;line-height:1.45}"
        "img{max-width:100%}h3{margin-top:1.6em}"
        "blockquote{border-left:3px solid #bbb;margin:.6em 0;padding:.2em .9em;color:#444}")
+css += __import__("os").environ.get("MD_PDF_CSS", "")   # e.g. landscape: @page{size:A4 landscape}
 parts = []
 for p in docs:
     md = p.read_text(encoding="utf-8")
