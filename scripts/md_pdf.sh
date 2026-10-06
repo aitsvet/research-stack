@@ -36,7 +36,10 @@ for p in docs:
     # an empty-src <img> prints as a broken-image icon, so render the alt as text.
     md = re.sub(r'!\[([^\]]*)\]\(\)', r'*[иллюстрация: \1]*', md)
     parts.append(markdown.markdown(md, extensions=["tables", "sane_lists"]))
-body = '<div style="page-break-after:always"></div>'.join(parts)
+# each document after the first opens a new page; a trailing break element would
+# spill onto a blank page whenever a document fills its last page exactly
+body = "".join(f'<section style="break-before:page">{h}</section>' if i else f"<section>{h}</section>"
+               for i, h in enumerate(parts))
 out.write_text(f'<!doctype html><html><head><meta charset="utf-8"><style>{css}</style></head>'
                f'<body>{body}</body></html>', encoding="utf-8")
 PYEOF
