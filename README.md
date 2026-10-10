@@ -58,17 +58,23 @@ servers in your AI tool*.
 
 ## Quick start — Windows (no Docker)
 
+The repository is public over HTTPS, so a clone needs no keys:
+
 ```powershell
 git clone https://github.com/aitsvet/research-stack.git
 cd research-stack
-python -m pip install -r requirements.txt
 ```
 
-Then follow `WINDOWS.md`, which installs Zotero, brings up Chrome with CDP on
-`:9222`, wires the MCP servers into your client, and lists the environment
-variables the pipeline expects. The Docker-only appliances (Selkies web UI,
-Ollama, Open WebUI, JupyterLab, the LibreOffice and PlantUML containers) are not
-part of the Windows path.
+Then open **`WINDOWS.md`** and work top to bottom. It is a checklist:
+**§1** is a preflight block that reports what is already installed, **§2** turns
+that table into a plan, **§3** asks three choices (how to clone — HTTPS by
+default, so SSH keys are optional and only needed to push; which Chrome gets
+CDP; which AI client), and **§4** is the install list — do only the items §1
+flagged. It brings up Zotero with its local API and MCP plugin, Chrome with CDP
+on `:9222`, the MCP servers in your client, and the environment variables the
+pipeline expects. The Docker-only appliances (Selkies web UI, Ollama, Open
+WebUI, JupyterLab, the LibreOffice and PlantUML containers) are not part of the
+Windows path.
 
 ## Repository layout
 
