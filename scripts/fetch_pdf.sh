@@ -13,7 +13,7 @@
 # same way launch_chromium.sh does, for hosts that refuse datacenter/foreign
 # IPs (kremlin.ru, sozd.duma.gov.ru, tc26.ru). The container is on the host
 # network, so a host-side proxy is reachable at localhost.
-set -u
+set -euo pipefail
 URL="$1"; OUTDIR="$2"; BASE="$3"
 C="${ZOTERO_CONTAINER:-zotero}"
 ZS="${ZOTERO_SETUP:-$HOME/research-stack}"
@@ -22,14 +22,17 @@ IMG_FLAG=""
 [ "${FETCH_PDF_IMAGES:-0}" = "1" ] || IMG_FLAG="--blink-settings=imagesEnabled=false"
 PROXY_FLAG=""
 [ -n "${CHROMIUM_PROXY:-}" ] && PROXY_FLAG="--proxy-server=${CHROMIUM_PROXY}"
-tmp="/tmp/cpdf_$$.pdf"
+rendered=$(mktemp "$OUTDIR/.render.XXXXXX.pdf")
+trap 'rm -f "$rendered"' EXIT
 docker exec -u 1000 "$C" bash -lc "/usr/bin/chromium-real --headless=new --no-sandbox --disable-gpu \
   $IMG_FLAG $PROXY_FLAG --user-data-dir=/tmp/cpdf_$$ \
   --print-to-pdf=/tmp/o_$$.pdf --print-to-pdf-no-header --no-pdf-header-footer \
   --virtual-time-budget=${FETCH_PDF_BUDGET:-15000} '$URL'" >/dev/null 2>&1
-docker cp "$C:/tmp/o_$$.pdf" "$OUTDIR/$BASE.pdf" 2>/dev/null
-docker exec "$C" rm -f "/tmp/o_$$.pdf" 2>/dev/null
-docker exec -u 1000 "$C" rm -rf "/tmp/cpdf_$$" 2>/dev/null
+docker cp "$C:/tmp/o_$$.pdf" "$rendered" 2>/dev/null
+[ -s "$rendered" ] || { echo "FAIL: empty rendered PDF" >&2; exit 1; }
+mv "$rendered" "$OUTDIR/$BASE.pdf"
+docker exec "$C" rm -f "/tmp/o_$$.pdf" 2>/dev/null || true
+docker exec -u 1000 "$C" rm -rf "/tmp/cpdf_$$" 2>/dev/null || true
 if [ -s "$OUTDIR/$BASE.pdf" ]; then
   sz=$(stat -c%s "$OUTDIR/$BASE.pdf")
   if [ "${FETCH_PDF_NO_MD:-0}" = "1" ]; then
@@ -40,4 +43,5 @@ if [ -s "$OUTDIR/$BASE.pdf" ]; then
   fi
 else
   echo "FAIL $BASE  ($URL)"
+  exit 1
 fi
