@@ -19,25 +19,24 @@ fetch_all() { # $1 = endpoint path, $2 = output jsonl
     # Non-local ZOTERO_API overrides still keep their ordinary proxy behavior.
     resp=$(curl -sf --noproxy localhost,127.0.0.1,::1 \
       "$BASE$ep?format=json&limit=100&start=$start")
-    n=$(jq 'length' <<<"$resp")
-    jq -c '.[]' <<<"$resp" >> "$out"
+    n=$(printf '%s' "$resp" | jq 'length')
+    if [ "$ep" = "/collections" ]; then
+      printf '%s' "$resp" | jq -c '.[]' >> "$out"
+    else
+      # Compact each API page before it touches disk. Full note bodies can
+      # exceed available temporary storage even when the manifest is small.
+      printf '%s' "$resp" | jq -c '.[]' | compact_items >> "$out"
+    fi
     start=$((start + 100))
     [ "$n" -lt 100 ] && break
   done
 }
-
-fetch_all "/collections" "$TMP/cols.jsonl"
-fetch_all "/items"       "$TMP/items.jsonl"
-fetch_all "/items/trash" "$TMP/trash.jsonl"
-
-echo "collections=$(wc -l < "$TMP/cols.jsonl") items=$(wc -l < "$TMP/items.jsonl") trash=$(wc -l < "$TMP/trash.jsonl")" >&2
 
 # Keep only fields the renderer uses. In particular, do this before --slurpfile:
 # copying multi-megabyte note/abstract bodies through every collection filter
 # made a medium library take many minutes even though the manifest prints only
 # the first 80 characters of a standalone note.
 compact_items() {
-  local src="$1"
   jq -c '
     def clean: gsub("[\r\n\t]+"; " ") | gsub(" +"; " ") | sub(" +$"; "");
     {
@@ -59,11 +58,14 @@ compact_items() {
            else null end) // "(untitled)") | clean
       )
     }
-  ' "$src" > "$src.compact"
-  mv "$src.compact" "$src"
+  '
 }
-compact_items "$TMP/items.jsonl"
-compact_items "$TMP/trash.jsonl"
+
+fetch_all "/collections" "$TMP/cols.jsonl"
+fetch_all "/items"       "$TMP/items.jsonl"
+fetch_all "/items/trash" "$TMP/trash.jsonl"
+
+echo "collections=$(wc -l < "$TMP/cols.jsonl") items=$(wc -l < "$TMP/items.jsonl") trash=$(wc -l < "$TMP/trash.jsonl")" >&2
 
 jq -n -r \
   --slurpfile cols "$TMP/cols.jsonl" \

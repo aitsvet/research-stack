@@ -15,7 +15,7 @@ and zotero_mcp helpers (create/update/import/note/local-serve).
 
 manifest.json: list of entries. Common fields:
   id        stable key for state/--only (required)
-  kind      arxiv | pdfurl | web | localpdf | meta
+  kind      arxiv | pdfurl | web | localpdf | localfile | meta
   itemType  Zotero type (preprint/conferencePaper/journalArticle/...); default preprint
   slug      filename slug for the pdf/md (default = id)
   item_key  attach to this EXISTING item instead of creating one
@@ -25,6 +25,9 @@ Per kind:
   arxiv     arxiv: "2503.09089"           (title/creators/date auto from Atom API)
   pdfurl    pdf_url: public PDF URL        + title/creators/date/venue/doi/extra
   localpdf  pdf_path: file under --pdfdir (or absolute) + title/... (needs --serve-ip)
+  localfile file_path: existing file (any format), text_path: optional existing
+            full-text extract, content_type: optional MIME; needs --serve-ip.
+            Keeps the corpus source in place and checkpoints each import.
   web       url: page URL (rendered via fetch_pdf.sh; live page attached as snapshot)
   meta      (no full text; metadata-only item)        + title/creators/...
 Metadata for non-arxiv kinds: title, date, creators [[last,first],...], venue,
@@ -39,7 +42,7 @@ import xml.etree.ElementTree as ET
 
 ZS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ZS, "scripts"))
-from zotero_mcp import MCP, add_note_file, import_file, import_local_files, item_key, result_text  # noqa
+from zotero_mcp import MCP, add_note_file, import_file, import_local_files, item_key, result_text, result_json  # noqa
 import acqlog  # noqa
 
 EXTRACT = os.path.join(ZS, "scripts", "extract_texts.py")
@@ -116,9 +119,17 @@ def main():
     a = ap.parse_args()
 
     os.makedirs(a.pdfdir, exist_ok=True); os.makedirs(a.notesdir, exist_ok=True)
-    entries = json.load(open(a.manifest))
-    state = json.load(open(a.state)) if os.path.exists(a.state) else {}
-    save = lambda: json.dump(state, open(a.state, "w"), indent=1, ensure_ascii=False)
+    with open(a.manifest, encoding="utf-8") as handle:
+        entries = json.load(handle)
+    state = {}
+    if os.path.exists(a.state):
+        with open(a.state, encoding="utf-8") as handle:
+            state = json.load(handle)
+    def save():
+        temporary = a.state + ".tmp"
+        with open(temporary, "w", encoding="utf-8") as handle:
+            json.dump(state, handle, indent=1, ensure_ascii=False)
+        os.replace(temporary, a.state)
     mcp = MCP()
     local_jobs = []  # (md_pdf_path, key, title) deferred to one serve session
 
@@ -127,7 +138,9 @@ def main():
         if a.only and eid not in a.only:
             continue
         st = state.get(eid, {})
-        if st.get("key") and (st.get("md") or e.get("kind") == "meta"):
+        if st.get("key") and (st.get("md") or e.get("kind") == "meta") and (
+                e.get("kind") != "localfile" or (st.get("attachment") == "verified"
+                and (not e.get("text_path") or st.get("note") in ("ok", "full-text attachment")))):
             print("skip(done):", eid); continue
         print("\n===", eid, "[", e.get("kind"), "]")
         rec = dict(st); rec["kind"] = e.get("kind")
@@ -198,6 +211,27 @@ def main():
                     import_file(mcp, key, url, title[:120]); rec["pdf"] = "snapshot"
                 except Exception:
                     rec["pdf"] = "snapshot?"
+            elif kind == "localfile":
+                import mimetypes
+                source = os.path.abspath(e["file_path"])
+                if not os.path.isfile(source):
+                    raise FileNotFoundError(source)
+                rec["source"] = source
+                state[eid] = rec; save()
+                if rec.get("attachment") != "verified":
+                    if not a.serve_ip:
+                        raise ValueError("localfile requires --serve-ip")
+                    mime = e.get("content_type") or mimetypes.guess_type(source)[0] or "application/octet-stream"
+                    _, ok, detail = import_local_files(mcp, [(source, key, title[:120])],
+                                                       a.serve_ip, a.serve_port,
+                                                       content_type=mime, if_exists="skip")[0]
+                    if not ok:
+                        raise RuntimeError("local import failed: " + detail)
+                    rec["attachment"] = "verified"; rec["pdf"] = "attached"
+                    state[eid] = rec; save()
+                md = e.get("text_path")
+                if md and not os.path.isfile(md):
+                    raise FileNotFoundError(md)
             # kind == meta: nothing
 
             # ---- replace old notes ----
@@ -209,12 +243,24 @@ def main():
             # ---- note + ingest copy ----
             if md and os.path.exists(md):
                 dest = os.path.join(a.notesdir, key + ".md")
-                shutil.copyfile(md, dest); rec["md"] = os.path.relpath(dest, a.notesdir); rec["md_bytes"] = os.path.getsize(md)
+                if os.path.abspath(md) != os.path.abspath(dest):
+                    shutil.copyfile(md, dest)
+                rec["md"] = os.path.relpath(dest, a.notesdir); rec["md_bytes"] = os.path.getsize(md)
                 try:
-                    add_note_file(mcp, key, md, title[:140], tags=["markdown-extract"])
+                    response = add_note_file(mcp, key, md, title[:140], tags=["markdown-extract"])
+                    result = result_json(response)
+                    if result is not None and not result.get("success"):
+                        raise RuntimeError("note failed: " + result_text(response)[:120])
                     rec["note"] = "ok"
                 except urllib.error.HTTPError as ex:
                     rec["note"] = "HTTP %s (md in notesdir only)" % ex.code
+                    if ex.code in (400, 413) and a.serve_ip:
+                        _, ok, detail = import_local_files(mcp, [(dest, key, "Full text: " + title[:100])],
+                                                           a.serve_ip, a.serve_port,
+                                                           content_type="text/markdown", if_exists="skip")[0]
+                        if not ok:
+                            raise RuntimeError("full-text attachment failed: " + detail)
+                        rec["note"] = "full-text attachment"
                 print("  md", rec.get("md_bytes"), "note", rec.get("note"))
             else:
                 rec["md"] = None
@@ -240,7 +286,10 @@ def main():
             acqlog.record(zotero=r["key"], title=e.get("title"), source=src, doi=e.get("doi"),
                           arxiv=e.get("arxiv"), method=e.get("kind"),
                           outcome=("error: " + r["error"]) if r.get("error") else "ok",
-                          extractor="pymupdf4llm" if r.get("md") else None)
+                          path=e.get("file_path") if e.get("kind") == "localfile" else None,
+                          text=e.get("text_path") if e.get("kind") == "localfile" else None,
+                          extractor=(e.get("extractor", "provided-text") if e.get("kind") == "localfile"
+                                     else "pymupdf4llm") if r.get("md") else None)
 
     print("\n==== SUMMARY ====")
     for e in entries:
