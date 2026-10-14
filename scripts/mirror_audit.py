@@ -27,7 +27,8 @@ Usage:
   --pool-below  share under which a collection counts as a discovery pool (0.5).
   --skip  extra glob of non-source files (repeatable). Always skipped: README.md,
           *.json, *.tsv, topic_*.md, abstracts*.md, coverage.md, summary.md,
-          dotfiles, and root-level files.
+          *.summary.md (a derived digest of its sibling source), dotfiles, and
+          root-level files.
 
 Exit status 1 when any discrepancy is found, so it can gate a commit.
 """
@@ -138,7 +139,7 @@ def main():
     # files no record covers, at any depth
     import fnmatch
     skip = ['README.md', '*.json', '*.tsv', 'topic_*.md', 'abstracts*.md',
-            'coverage.md', 'summary.md', '*.py', '*.sh', '.*'] + a.skip
+            'coverage.md', 'summary.md', '*.summary.md', '*.py', '*.sh', '.*'] + a.skip
     live_ptrs = {p for iid, ps in pointers.items() if iid in by_iid for p in ps
                  if p in fileset or p in dirset}
     stem = lambda f: os.path.splitext(f)[0]
