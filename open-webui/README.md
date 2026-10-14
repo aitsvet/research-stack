@@ -1,7 +1,7 @@
 # Open WebUI + Qwen
 
 Агент на моделях Qwen (DashScope / Alibaba Model Studio) внутри Open WebUI —
-сервиса `open-webui` из корневого compose стека `research-stack`. Здесь лежит то,
+сервиса `open-webui` из корневого compose стека research-stack. Здесь лежит то,
 что делает из него агента: сам пайп, установщик и пример прокси. Синхронизация
 библиотеки Zotero между серверами — отдельная, независимая от OWUI подсистема:
 SETUP.md, «Library sync between peers».
@@ -34,7 +34,7 @@ tool-calling у Qwen на Ollama, из-за которых тег образа �
 ## Развёртывание
 
 ```bash
-cd ~ && git clone <репозиторий> research-stack && cd research-stack
+git clone <репозиторий> research-stack && cd research-stack
 cp .env.example .env && $EDITOR .env   # ZOTERO_*, DASHSCOPE_API_KEY, WEBUI_SECRET_KEY
 docker compose up -d                   # zotero, open-webui, searxng, mcpo
 ./open-webui/install_function.sh       # ставит пайп, печатает список моделей

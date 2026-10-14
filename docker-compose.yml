@@ -233,7 +233,7 @@ services:
   ############################
   # One-shot renderer, not a daemon. Keeps Java and Graphviz off the host.
   #   docker compose --profile tools run --rm plantuml -tpng '<file>.puml'
-  # WORK points at the tree holding the diagrams (default: ./diagrams).
+  # WORK points at the tree holding the diagrams (default: ./diagrams, ignored).
   # Output lands beside the source, owned by the host user.
   plantuml:
     build: ./docker/plantuml
@@ -245,7 +245,10 @@ services:
     working_dir: /work
 
 volumes:
+  # Created once by hand (`docker volume create open-webui`) so that recreating
+  # the stack never drops chat history; OPEN_WEBUI_VOLUME names an existing one.
   open-webui-data:
+    name: ${OPEN_WEBUI_VOLUME:-open-webui}
     external: true
   open-terminal-data:
   # To point this at an Ollama data dir that already has models pulled

@@ -156,7 +156,8 @@ args = ["-lc", "set -a; . \"$HOME/research-stack/.env\"; set +a; export NO_PROXY
 Codex speaks stdio, so `mcp-remote` bridges it to the plugin's HTTP endpoint; the
 token comes from this repo's `.env` at launch and never enters `config.toml`, and
 `NO_PROXY` keeps an inherited proxy off the loopback call. `mcp-remote` needs a
-current Node LTS.
+current Node LTS. On a shared machine pass the header through `--header-file`
+instead, so the token stays out of the process list.
 
 ## Daily operation
 
