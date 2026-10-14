@@ -78,6 +78,12 @@ The pipeline is **two-pass on purpose**: pass 1 (`discover.py`) creates lightwei
 | `make_docx_template.py ACCEPTED.docx TEMPLATE.docx` | Accepted submission → reusable, text-free export template. The template is a **build input** for `md_docx.py`, so it has to be committed; the accepted file itself must not be, since it carries the manuscript and its figure. Body reduced to an empty paragraph plus the original `sectPr`, footnote 1 kept as an empty slot, figure replaced by a 1×1 placeholder, `docProps` cleared. Prove the result by exporting the same Markdown through both templates and comparing page count, page size, extracted text, font set and `sectPr`. |
 | `zotero_mcp.py` | Canonical MCP JSON-RPC client (session envelope, throttle, 429 back-off) + `result_json` / `item_key` / `add_note_file` / `import_file` / `import_local_files` helpers. **Import this** in new scripts instead of re-rolling the client — every script here does. |
 
+## Corpus → grounded draft (synthesis)
+
+Once `extract_texts.py` has produced the per-item `.txt` and `extract_texts.py check` passes on it, drive synthesis off those, never the PDFs. Fan out **one reader-subagent per section** over just that section's `text/<itemKey>.txt`; each returns a short digest — citeable points tagged with the `itemKey`, the key caveats, and an explicit list of claims it could **not** find in the text (so nothing gets invented to fill a gap). The orchestrator writes the draft from the digests, keeping its own context lean. Build the reference list from Crossref (pull first-author / year / venue per DOI) rather than from model memory — that removes the hallucinated-author failure mode at the source — then gate on `verify_refs.py --per-line` before declaring done.
+
+From draft to submission the loop is `export_paper.sh` → the editor marks up the exported file by hand → `merge_edits.py` folds their copy back in as a three-way paragraph merge. `prose_lint.py` counts what would otherwise be re-read by eye each round; its bands and word lists live in the project, never here. Mechanics and traps: `SCRIPTS.md`.
+
 ## Markdown master → journal docx and pdf
 
 One rule makes the rest work: **the `.md` is the source, the `.docx` is a build artefact.** Nobody
