@@ -16,13 +16,17 @@ Usage:
     chandra_ocr.py <pdf> [--out out.md] [--url http://localhost:8000/v1]
                    [--model chandra] [--dpi 192] [--min-dim 1024]
                    [--max-tokens 11000] [--timeout 600] [--api-key KEY]
+                   [--cache-dir DIR] [--wait-endpoint 1800]
 """
 import argparse
 import base64
+import http.client
 import json
 import os
+import shutil
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -101,6 +105,29 @@ def _thread_page(path, i):
     return doc[i]
 
 
+def _endpoint_down(e):
+    """True when the endpoint was unreachable, as opposed to rejecting the page:
+    refused/reset/dropped connections (a restarting server or tunnel)."""
+    if isinstance(e, urllib.error.HTTPError):
+        return False
+    if isinstance(e, urllib.error.URLError):
+        e = e.reason
+    return isinstance(e, (ConnectionError, http.client.RemoteDisconnected))
+
+
+def wait_endpoint(url, limit):
+    """Block until GET <url>/models answers, up to `limit` seconds."""
+    probe = url.rstrip("/").removesuffix("/chat/completions") + "/models"
+    deadline = time.monotonic() + limit
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(probe, timeout=10):
+                return True
+        except Exception:  # noqa: BLE001
+            time.sleep(15)
+    return False
+
+
 def render_jpeg(page, dpi, min_dim, max_dim, quality, shrink=1.0):
     """Render to JPEG. Resolution = max(dpi, min-dim-driven dpi), but the
     longest side is capped at max_dim px (keeps vision-token count and request
@@ -137,6 +164,14 @@ def main():
                     help="pages in flight at once. A page is decode-bound, and "
                          "vLLM batches, so 4-8 cuts wall-clock near-linearly on "
                          "long scans; keep 1 to leave a shared endpoint alone.")
+    ap.add_argument("--cache-dir", default=None,
+                    help="keep each finished page as <dir>/<N>.md and reuse it on "
+                         "a re-run, so an interrupted run resumes instead of "
+                         "starting over; removed once every page succeeded "
+                         "(default: <out>.pages/)")
+    ap.add_argument("--wait-endpoint", type=int, default=1800,
+                    help="seconds to wait for an unreachable endpoint to come "
+                         "back before failing the page")
     a = ap.parse_args()
 
     out_path = a.out or (os.path.splitext(a.pdf)[0] + ".md")
@@ -146,11 +181,20 @@ def main():
           f"{'' if a.concurrency == 1 else f', {a.concurrency} in flight'}",
           file=sys.stderr)
 
+    cache = a.cache_dir or out_path + ".pages"
+    os.makedirs(cache, exist_ok=True)
+
     def ocr_one(i):
+        cached = os.path.join(cache, f"{i}.md")
+        if os.path.exists(cached):
+            with open(cached, encoding="utf-8") as f:
+                return f.read()
         html = None
-        # progressive fallback if the endpoint rejects size/context
-        for shrink, mtok in ((1.0, a.max_tokens), (0.8, min(a.max_tokens, 7000)),
-                             (0.65, 5000)):
+        # progressive fallback if the endpoint rejects size/context; an
+        # unreachable endpoint is waited out at the same size instead
+        steps = [(1.0, a.max_tokens), (0.8, min(a.max_tokens, 7000)), (0.65, 5000)]
+        while steps:
+            shrink, mtok = steps[0]
             try:
                 jpg, w, h = render_jpeg(_thread_page(a.pdf, i), a.dpi, a.min_dim,
                                         a.max_dim, a.jpeg_quality, shrink)
@@ -159,15 +203,31 @@ def main():
                       f"shrink={shrink} ...", file=sys.stderr)
                 html = ocr_page(jpg, "jpeg", a.url, a.model, a.api_key, mtok, a.timeout)
                 break
-            except urllib.error.HTTPError as e:
-                msg = e.read().decode("utf-8", "replace")[:300]
-                print(f"[chandra] page {i + 1} HTTP {e.code}: {msg} -> retry smaller",
-                      file=sys.stderr)
             except Exception as e:  # noqa: BLE001
-                print(f"[chandra] page {i + 1} {type(e).__name__}: {e} -> retry smaller",
-                      file=sys.stderr)
+                if not _endpoint_down(e):
+                    steps.pop(0)
+                    log_retry(i, e)
+                    continue
+                print(f"[chandra] page {i + 1} {type(e).__name__}: endpoint down, "
+                      f"waiting up to {a.wait_endpoint}s", file=sys.stderr)
+                if not wait_endpoint(a.url, a.wait_endpoint):
+                    break
         md = html_to_md(html) if html else "*[OCR FAILED FOR THIS PAGE]*"
-        return f"{{{i}}}{PAGE_SEP}\n\n{md}"
+        page_md = f"{{{i}}}{PAGE_SEP}\n\n{md}"
+        if html:
+            with open(cached + ".tmp", "w", encoding="utf-8") as f:
+                f.write(page_md)
+            os.replace(cached + ".tmp", cached)
+        return page_md
+
+    def log_retry(i, e):
+        if isinstance(e, urllib.error.HTTPError):
+            msg = e.read().decode("utf-8", "replace")[:300]
+            print(f"[chandra] page {i + 1} HTTP {e.code}: {msg} -> retry smaller",
+                  file=sys.stderr)
+        else:
+            print(f"[chandra] page {i + 1} {type(e).__name__}: {e} -> retry smaller",
+                  file=sys.stderr)
 
     if a.concurrency > 1:
         with ThreadPoolExecutor(max_workers=a.concurrency) as pool:
@@ -178,8 +238,11 @@ def main():
     with open(out_path, "w", encoding="utf-8") as f:
         f.write("\n\n" + "\n\n".join(pages_md) + "\n")
     print(f"[chandra] wrote {out_path} ({len(pages_md)} pages)", file=sys.stderr)
+    failed = sum("OCR FAILED" in p for p in pages_md)
+    if not failed:  # complete: the cache has nothing left to resume
+        shutil.rmtree(cache, ignore_errors=True)
     acqlog.record(path=a.pdf, extractor="chandra", text=out_path, pages=len(pages_md),
-                  ocr_failed=sum("OCR FAILED" in p for p in pages_md) or None)
+                  ocr_failed=failed or None)
 
 
 if __name__ == "__main__":
