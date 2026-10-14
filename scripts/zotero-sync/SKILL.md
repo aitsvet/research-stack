@@ -20,6 +20,10 @@ Run commands from the research-stack root and use `./.venv/bin/python`.
   - `base/zotero.sqlite` — a distinct copy, the last snapshot **both** peers
     accepted, and the origin of the three-way comparison.
 
+  With `SYNC_BACKUP_STORAGE=0`, sync retains the database snapshots but does
+  not create a second local attachment tree; attachment backups are managed
+  separately. Keep the configured single live attachment tree intact.
+
   Advancing the base never rewrites the backup; refreshing the backup never
   invalidates the base. Unequal non-empty peers without a trustworthy base are a
   conflict, not a direction guess. Because the base advances only after both

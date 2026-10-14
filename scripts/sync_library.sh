@@ -20,6 +20,8 @@
 #                        storage/            — its attachment copy
 #                        base/zotero.sqlite  — a SEPARATE copy: the last
 #                                             snapshot both peers accepted
+#   SYNC_BACKUP_STORAGE  set to 0 to keep attachment files only in live storage
+#                        when attachment backups are managed separately.
 #                      The two DB copies are independent files. Advancing the
 #                      base never rewrites the backup, and refreshing the
 #                      backup never invalidates the base that classifies the
@@ -42,6 +44,8 @@ REPLICA="${SYNC_REPLICA-}"
 RROOT="${SYNC_REPLICA_ROOT:-research-stack}"
 SYNC="$ROOT/.sync"
 BACKUP_DIR="${SYNC_BACKUP_DIR:-$SYNC/backup}"
+BACKUP_STORAGE="${SYNC_BACKUP_STORAGE:-1}"
+case "$BACKUP_STORAGE" in 0|1) ;; *) echo "SYNC_BACKUP_STORAGE must be 0 or 1" >&2; exit 2 ;; esac
 BASE_DIR="$BACKUP_DIR/base"
 BASE="$BASE_DIR/zotero.sqlite"
 KEY="${SYNC_SSH_KEY-}"
@@ -209,8 +213,10 @@ print(f'origin filled: integrity ok, items: {n}')
 PY
   mkdir -p "$BACKUP_DIR" "$BASE_DIR"
   cp -a "$ROOT/config/Zotero/zotero.sqlite" "$BASE"
-  rsync -az --delete --info=stats1 \
-    "$ROOT/config/Zotero/storage/" "$BACKUP_DIR/storage/"
+  if [ "$BACKUP_STORAGE" = 1 ]; then
+    rsync -az --delete --info=stats1 \
+      "$ROOT/config/Zotero/storage/" "$BACKUP_DIR/storage/"
+  fi
   if [ -n "$local_was" ]; then docker start zotero >/dev/null; local_was=""; fi
   echo "==> done"
   exit 0
@@ -319,8 +325,10 @@ phase=done
 # reflecting the library rather than the classification base.
 mkdir -p "$BACKUP_DIR" "$BASE_DIR"
 cp -a "$ROOT/config/Zotero/.snapshot/zotero.sqlite" "$BASE"
-rsync -az --delete --info=stats1 \
-  "$ROOT/config/Zotero/storage/" "$BACKUP_DIR/storage/"
+if [ "$BACKUP_STORAGE" = 1 ]; then
+  rsync -az --delete --info=stats1 \
+    "$ROOT/config/Zotero/storage/" "$BACKUP_DIR/storage/"
+fi
 
 if [ -n "$was_running" ]; then
   echo "==> starting zotero on the replica"
