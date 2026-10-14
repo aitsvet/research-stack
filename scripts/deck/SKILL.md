@@ -5,10 +5,12 @@ extended, or reviewed for layout quality — new decks, slides added to a
 foreign deck, or auditing a generated one. It does not depend on any Claude
 plugin/skill machinery; everything runs from here with `../../.venv/bin/python`.
 
-For a deck authored as hand-written HTML rather than as a .pptx, the engine and
-the user-fillable image slot live in `html/` — see `html/README.md` for wiring,
-the animation-gating rule, and the CSS class-name collision that silently
-truncates layout.
+HTML authored for the browser leg below has two traps. Gate entry animations
+on the active-slide state and `prefers-reduced-motion`, with a visible
+(`opacity: 1`) base state — otherwise a capture at load time records
+`opacity: 0`; check the settled state with animation disabled. Give new CSS
+blocks a unique class prefix: short global names (`.lg`, `.n`, `.s`, …) are
+often taken already, and the foreign rule silently truncates the layout.
 
 **Core discipline: never emit or trust guessed geometry.** Every failure mode
 this pipeline exists for came from estimated text sizes and hand-arithmetic
