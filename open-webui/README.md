@@ -112,7 +112,8 @@ compose, `127.0.0.1:9090`), `fetch_url` дочитывает страницу. �
 MCP — плагин **внутри** контейнера zotero: `http://127.0.0.1:23120/mcp`
 (streamable HTTP), `Authorization: Bearer $ZOTERO_MCP_TOKEN`. Плагин и токен
 живут в профиле Zotero (`prefs.js` → `mcp.server.authToken`, там же
-`requireAuth=true`, `allowRemote=true`).
+`requireAuth=true`, `allowRemote=false` — под host-сетью loopback
+контейнера и есть loopback хоста, так что OWUI достаёт плагин и без этого).
 
 Open WebUI 0.6.31+ подключает MCP нативно: **Admin → Settings → External Tools
 → Add → Type: MCP (Streamable HTTP)**, URL выше, Auth = Bearer с токеном. OWUI

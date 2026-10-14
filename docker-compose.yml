@@ -100,7 +100,7 @@ services:
       # valves — Open WebUI stores valve values in its own DB, so changing them
       # here does not touch an already-installed pipe (set those in the UI).
       # Model names belong to the endpoint, not to the account: the token-plan
-      # host serves ten models and none of the old names. Check the catalogue
+      # host serves its own smaller catalogue under different names. Check the catalogue
       # with `GET $DASHSCOPE_BASE_URL/models` before changing the base URL.
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
       - DASHSCOPE_BASE_URL=${DASHSCOPE_BASE_URL:-https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1}

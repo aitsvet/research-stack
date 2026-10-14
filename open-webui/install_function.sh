@@ -15,7 +15,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 [ -f .env ] && set -a && . ./.env && set +a
 
-BASE="${OWUI_URL:-http://localhost:3111}"
+BASE="${OWUI_URL:-http://localhost:${OWUI_PORT:-4096}}"
 EMAIL="${OWUI_EMAIL:?задать OWUI_EMAIL в .env}"
 PASS="${OWUI_PASSWORD:?задать OWUI_PASSWORD в .env}"
 DRY_RUN="${DRY_RUN:-0}"

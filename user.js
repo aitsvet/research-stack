@@ -1,4 +1,4 @@
-// Zotero user.js — applied to the active profile by scripts/apply-config.sh.
+// Zotero user.js — applied to the active profile by scripts/apply_config.sh.
 // Settings here are re-asserted on every Zotero startup.
 //
 // NOT included on purpose: extensions.zotero.zotero-mcp-plugin.mcp.server.authToken

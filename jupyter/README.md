@@ -9,7 +9,8 @@ cp .env.example .env && $EDITOR .env    # JUPYTER_TOKEN, WORK_DIR
 docker compose up -d
 ```
 
-- Lab UI: `http://127.0.0.1:8888` (token from `.env`).
+- Lab UI: `http://127.0.0.1:8890` (token from `.env`; `JUPYTER_PORT` moves it —
+  Jupyter's own default 8888 is taken by the Zotero web UI).
 - MCP endpoint: `http://127.0.0.1:4040/mcp`. Register in Claude Code:
   `claude mcp add jupyter http://127.0.0.1:4040/mcp -t http`;
   OpenCode: already wired in `../opencode/opencode.json`.

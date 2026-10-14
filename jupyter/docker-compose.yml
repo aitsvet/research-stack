@@ -15,6 +15,7 @@ services:
       --IdentityProvider.token=${JUPYTER_TOKEN}
       --ServerApp.allow_origin='*'
       --ServerApp.ip='127.0.0.1'
+      --ServerApp.port=${JUPYTER_PORT:-8890}
     restart: unless-stopped
 
   jupyter-mcp:
@@ -34,6 +35,6 @@ services:
       /usr/local/lib/python3.11/site-packages/jupyter_mcp_server/server.py &&
       jupyter-mcp-server start
       --transport streamable-http --port 4040
-      --document-url http://127.0.0.1:8888 --document-token $$JUPYTER_TOKEN
-      --runtime-url  http://127.0.0.1:8888 --runtime-token  $$JUPYTER_TOKEN"
+      --document-url http://127.0.0.1:${JUPYTER_PORT:-8890} --document-token $$JUPYTER_TOKEN
+      --runtime-url  http://127.0.0.1:${JUPYTER_PORT:-8890} --runtime-token  $$JUPYTER_TOKEN"
     restart: unless-stopped
