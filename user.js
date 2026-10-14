@@ -46,3 +46,9 @@ user_pref("extensions.zotero.zotero-mcp-plugin.ui.includeMetadata",             
 // Read-only REST view of the library; scripts/library_manifest.sh depends on it.
 // The connector server it rides on binds loopback only.
 user_pref("extensions.zotero.httpServer.localAPI.enabled", true);
+
+// === Database backups ===
+// No rolling zotero.sqlite.bak copies: the live DB is the only local copy and
+// a single verified export lives off-host. Zotero still writes one-off backups
+// before schema upgrades.
+user_pref("extensions.zotero.backup.numBackups", 0);
