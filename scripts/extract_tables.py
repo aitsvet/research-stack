@@ -26,7 +26,8 @@ structure, and compare the two when in doubt.
 """
 import argparse, glob, json, os, re, sys
 
-PAGE_MARK = re.compile(r"^\{(\d+)\}")
+from pagemd import MARK
+
 HEADING = re.compile(r"^#{1,6}\s+(.*\S)")
 BOLD_HEADING = re.compile(r"^\*\*(.+?)\*\*\s*$")
 ROW = re.compile(r"^\s*\|(.+)\|\s*$")
@@ -46,7 +47,7 @@ def from_markdown(path, min_rows):
     page, heading, out, i = None, None, [], 0
     while i < len(lines):
         line = lines[i]
-        m = PAGE_MARK.match(line)
+        m = MARK.match(line)
         if m:
             page = int(m.group(1))
         h = HEADING.match(line) or BOLD_HEADING.match(line)

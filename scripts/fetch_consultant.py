@@ -22,6 +22,8 @@ import subprocess
 import sys
 import tempfile
 
+from pagemd import mark
+
 FETCH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fetch_pdf.sh")
 BASE = "https://www.consultant.ru/document/%s/"
 
@@ -123,7 +125,7 @@ def main():
             continue
         kept += 1
         print("  ch%03d keep (%d chars)" % (i, len(txt)), file=sys.stderr)
-        parts.append("\n\n{%d}%s\n\n%s" % (kept, "-" * 48, txt))
+        parts.append("\n\n%s\n\n%s" % (mark(kept), txt))
 
     if not parts:
         sys.exit("no chapters kept — check --grep")

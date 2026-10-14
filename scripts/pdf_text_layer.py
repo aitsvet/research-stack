@@ -16,6 +16,8 @@ from bs4 import BeautifulSoup
 import fitz
 import markdown
 
+import pagemd
+
 
 def compact(text):
     # Ignore line wrapping, soft hyphens and our explicit direction marks.
@@ -38,11 +40,10 @@ def add_layer(source, text_file, output, font_file):
     body = text_file.read_text(encoding="utf-8")
     if "OCR FAILED" in body:
         raise ValueError("OCR contains failed pages")
-    parts = re.split(r"(?m)^\{(\d+)\}-{48}\s*$", body)
-    ids = [int(n) for n in parts[1::2]]
+    ids, bodies = pagemd.split(body)
     texts = [BeautifulSoup(markdown.markdown(t, extensions=["tables"]),
                            "html.parser").get_text(" ", strip=True)
-             for t in parts[2::2]]
+             for t in bodies]
     with fitz.open(source) as doc:
         if not ids or len(ids) != len(doc) or ids != list(range(ids[0], ids[0] + len(doc))) or ids[0] not in (0, 1):
             raise ValueError("Page markers must cover every PDF page in order")

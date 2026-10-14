@@ -17,6 +17,7 @@ import sys
 import time
 
 import cdp_eval
+from pagemd import mark
 
 BODY_SEL = ".read__internal_content"
 MAX_PAGES = 60
@@ -111,7 +112,7 @@ def main():
                      "(официальная публикация, полный текст, "
                      "%d стр. постраничной навигации сайта)*\n" % (act_id, len(pages)))
             for i, p in enumerate(pages, 1):
-                fh.write("\n\n{%d}%s\n\n" % (i, "-" * 48))
+                fh.write("\n\n%s\n\n" % mark(i))
                 fh.write(p)
             fh.write("\n")
         total = sum(len(p) for p in pages)

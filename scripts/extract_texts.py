@@ -37,8 +37,8 @@ Env:
 """
 import json, os, re, sys, subprocess, glob
 import acqlog
+import pagemd
 
-SEP_DASHES = 48  # marker-compatible page rule width
 ZSTORE  = os.environ.get("ZOTERO_STORAGE",
                          os.path.join(os.path.expanduser(os.environ.get("ZOTERO_HOME", "~/zotero")), "Zotero", "storage"))
 DISC    = os.environ.get("DISCOVERY_OUT", os.path.expanduser("~/research-stack/.discovery"))
@@ -61,7 +61,6 @@ def _portable(p):
 MIN_CHARS_PER_PAGE = 400
 # `src` values this script writes; anything else in a manifest came from elsewhere.
 OWN_SRCS = {"pdftotext", "ft-cache", "html", "none", "external"}
-PAGE_MARK = re.compile(r"^\{(\d+)\}-{%d}$" % SEP_DASHES, re.M)
 
 
 def find_pdf(att_key):
@@ -122,9 +121,8 @@ def _clean(text):
     text = re.sub(r" *\n *", "\n", text)
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
-def paginate(pages, sep_dashes=SEP_DASHES):
-    rule = "-" * sep_dashes
-    return "".join(f"{{{i}}}{rule}\n\n{p}\n\n" for i, p in enumerate(pages))
+def paginate(pages):
+    return "".join(f"{pagemd.mark(i)}\n\n{p}\n\n" for i, p in enumerate(pages))
 
 def assess(pages):
     """Completeness facts for a paged extraction. `complete` is False when any flag
@@ -189,11 +187,11 @@ def html_text(path):
         t.decompose()
     return soup.get_text("\n")
 
-def pdf_to_markdown(pdf_path, sep_dashes=SEP_DASHES):
+def pdf_to_markdown(pdf_path):
     """Pure-python PDF -> Markdown (pymupdf4llm text-layer reader, no OCR/GPU).
 
     Emits the marker-compatible paginated format: each page is prefixed by
-    '{<page_index>}' immediately followed by a rule of `sep_dashes` dashes, then
+    the `pagemd` mark of its index (`{<page_index>}` + 48 dashes), then
     the page's markdown. Headings/bold come from font-size heuristics; images and
     vector graphics are ignored (text reference only)."""
     from pymupdf4llm.helpers import pymupdf_rag
@@ -202,11 +200,10 @@ def pdf_to_markdown(pdf_path, sep_dashes=SEP_DASHES):
         ignore_images=True, ignore_graphics=True,
         show_progress=False,
     )
-    rule = "-" * sep_dashes
     parts = []
     for i, ch in enumerate(chunks):
         text = (ch.get("text") if isinstance(ch, dict) else str(ch)) or ""
-        parts.append(f"{{{i}}}{rule}\n\n{text.rstrip()}")
+        parts.append(f"{pagemd.mark(i)}\n\n{text.rstrip()}")
     return "\n\n" + "\n\n".join(parts) + "\n"
 
 
@@ -324,7 +321,7 @@ def cmd_md(argv):
         stem = os.path.splitext(os.path.basename(pdf))[0]
         out_path = os.path.join(outdir, stem + args.suffix)
         acqlog.record(path=pdf, extractor="text-layer", text=out_path,
-                      pages=len(re.findall(r"^\{\d+\}-{48}$", md, re.M)) or None)
+                      pages=len(pagemd.numbers(md)) or None)
         with open(out_path, "w") as f:
             f.write(md)
         n_ok += 1
@@ -484,7 +481,7 @@ def cmd_check(argv):
     rows, n_fail = [], 0
     for key, t in texts.items():
         e = man.get(key, {})
-        marks = [int(m) for m in PAGE_MARK.findall(t)]
+        marks = pagemd.numbers(t)
         why = []
         if e.get("src", "pdftotext") == "pdftotext":   # paged PDF text (flat sources carry no marks)
             if not marks:

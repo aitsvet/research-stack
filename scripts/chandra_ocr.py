@@ -55,7 +55,7 @@ Guidelines:
 * Make sure the text is accurate and easy for a human to read and interpret.  Reading order should be correct and natural.
 """.strip()
 
-PAGE_SEP = "-" * 48  # marker-compatible {N} + 48 dashes
+from pagemd import mark
 
 
 # HTML -> Markdown lives in html_md.py (shared with convert_office.py, which
@@ -213,7 +213,7 @@ def main():
                 if not wait_endpoint(a.url, a.wait_endpoint):
                     break
         md = html_to_md(html) if html else "*[OCR FAILED FOR THIS PAGE]*"
-        page_md = f"{{{i}}}{PAGE_SEP}\n\n{md}"
+        page_md = f"{mark(i)}\n\n{md}"
         if html:
             with open(cached + ".tmp", "w", encoding="utf-8") as f:
                 f.write(page_md)
