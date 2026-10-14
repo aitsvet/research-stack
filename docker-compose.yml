@@ -20,7 +20,9 @@ services:
       # added comment line turns into a broken directive.
       - DISABLE_IPV6=true
     volumes:
-      - ./config:/config
+      # The library lives outside the checkout, so a fresh clone or a deleted
+      # working tree never takes it along. Override with ZOTERO_HOME in .env.
+      - ${ZOTERO_HOME:-${HOME}/zotero}:/config
       - ./docker/zotero/default.conf:/defaults/default.conf:ro
       # Selkies hardcodes 0.0.0.0 for its websocket/control binds (no knob);
       # this init script seds them to loopback before services start. Killing

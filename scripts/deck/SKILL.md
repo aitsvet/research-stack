@@ -31,10 +31,10 @@ by lint before eyeballs.
      `harness/tokens.css` (all sizes in pt, canvas 1920x1080px = 20x11.25in).
      Tag exported elements `data-pptx="text|card|image"` (cards before their
      text; images carry `data-src`). Put the HTML + assets under
-     `config/deck-harness/` (container-visible), then:
+     `~/zotero/deck-harness/` (`$ZOTERO_HOME`, container-visible as `/config`), then:
      ```
      scripts/deck/harness/harvest.py file:///config/deck-harness/x.html g.json --shot ref.png
-     scripts/deck/harness/emit_pptx.py g.json out.pptx --asset-root config/deck-harness
+     scripts/deck/harness/emit_pptx.py g.json out.pptx --asset-root ~/zotero/deck-harness
      ```
      Chromium (launch: `scripts/launch_chromium.sh`, CDP :9222) lays out and
      measures; the emitter writes native shapes at measured px (9525 EMU/px,

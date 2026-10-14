@@ -8,13 +8,14 @@
 # deterministically on first open, which is done right here, followed by an
 # integrity_check.
 #
-#   ./scripts/snapshot_db.sh        # snapshot into config/Zotero/.snapshot/
+#   ./scripts/snapshot_db.sh        # snapshot into $ZOTERO_HOME/Zotero/.snapshot/
 #
 # Invoked over ssh / locally by sync_library.sh; safe to run by hand.
 
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ZDIR="$ROOT/config/Zotero"
+if [ -f "$ROOT/.env" ]; then set -a; . "$ROOT/.env"; set +a; fi
+ZDIR="${ZOTERO_HOME:-$HOME/zotero}/Zotero"
 SNAP="$ZDIR/.snapshot"
 DBS=(zotero.sqlite zotero-mcp-vectors.sqlite)
 PYTHON="$ROOT/.venv/bin/python"

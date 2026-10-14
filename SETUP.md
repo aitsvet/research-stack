@@ -50,7 +50,7 @@ Container uses **`network_mode: host`** — every port the container opens is di
 | `open-webui/` / `opencode/` / `jupyter/` | yes | Optional appliances: AI front-ends (Open WebUI, OpenCode) and JupyterLab+MCP, each with its own README. `opencode/` and `jupyter/` bring their own compose; Open WebUI runs from the root compose instead — it moved there together with SearXNG, and the appliance copy that stayed behind only clashed over `container_name`. |
 | `user.js` | yes | Zotero prefs — MCP plugin (`requireAuth=true`, all write scopes on) and the local API on :23119 that `library_manifest.sh` reads |
 | `.env` | **no** | Real secrets: web-UI password, Zotero MCP token |
-| `config/` | **no** | Zotero profile, library, attachments, installed `.xpi` plugins |
+| `~/zotero` (`ZOTERO_HOME`) | outside | Zotero profile, library, attachments, installed `.xpi` plugins — mounted as `/config`, kept outside the checkout so a fresh clone or a removed working tree cannot take the library along |
 
 ## Prerequisites
 
@@ -64,8 +64,13 @@ Container uses **`network_mode: host`** — every port the container opens is di
    ```bash
    cp .env.example .env
    nano .env                       # set ZOTERO_PASSWORD, leave ZOTERO_MCP_TOKEN blank for now
+   mkdir -p ~/zotero               # data dir, outside the checkout (ZOTERO_HOME)
    docker compose up -d
    ```
+   Upgrading a checkout that still keeps the data in `config/`: stop Zotero, move the
+   directory out on the same filesystem (a rename, nothing is copied), start again —
+   `docker compose stop zotero && mv config ~/zotero && docker compose up -d zotero`.
+   Do this before deleting or re-cloning the old checkout.
 
 2. **Open the Zotero UI** from your laptop:
    ```bash
@@ -77,7 +82,7 @@ Container uses **`network_mode: host`** — every port the container opens is di
 
 4. **Install the MCP plugin.** Download once:
    ```bash
-   curl -L -o config/zotero-mcp-for-claude-code.xpi \
+   curl -L -o ~/zotero/zotero-mcp-for-claude-code.xpi \
      https://github.com/lricher7329/zotero-mcp-claude-code/releases/latest/download/zotero-mcp-for-claude-code.xpi
    ```
    Then in Zotero: *Tools → Add-ons → ⚙ → Install Add-on From File* → pick `/config/zotero-mcp-for-claude-code.xpi`. Restart Zotero when prompted.
@@ -212,7 +217,7 @@ Run it ON the origin, once per replica:
 4. if the replica wins, pulls its storage and installs its exact DB on the
    origin; then pushes the winning snapshot back with compressed,
    partial-transfer-preserving `rsync --delete` (storage, styles,
-   translators + the `config/.zotero/` profile carrying the MCP plugin);
+   translators + the `.zotero/` profile carrying the MCP plugin);
    `place_snapshot.sh` on the replica swaps the DB, checks integrity and item
    count, and the replica's container starts again — or is left stopped if
    the check fails.
@@ -292,7 +297,7 @@ Standing rule for the host: **nothing binds `0.0.0.0` except sshd (`:22`) and th
 
 **Chromium runs under XWayland, not native Wayland.** Chromium's Ozone-Wayland implementation has unreliable input handling under wlroots-based compositors like labwc — the symptom is a visible-but-unclickable window (popups appear, clicks fall through, title bar may be missing). `scripts/launch_chromium.sh` sets `--ozone-platform=x11` and `DISPLAY=:0` to route through the Xwayland server that labwc already runs. The CSD/SSD path under XWayland is much better-supported. The image's labwc defaults have `<windowRule identifier="chromium" serverDecoration="no" />` entries meant to disable server-side frames for native-Wayland chromium; under XWayland the WM_CLASS class is `Chromium` (capital) which doesn't match the lowercase `identifier`, so those rules silently no-op and we get the wildcard `*=yes` default for free. No labwc patching required as long as we stay on XWayland.
 
-**The image regenerates labwc's rc.xml on every container start** from `/defaults/labwc.xml`, then applies a few env-driven sed tweaks (`NO_FULL=true` is set by default and strips the wildcard maximize rule). Editing `config/.config/labwc/rc.xml` directly is *not* persistent across container recreations. If you ever need to customize labwc here, bind-mount a replacement over `/defaults/labwc.xml:ro` in compose so the init `cp` picks up your version.
+**The image regenerates labwc's rc.xml on every container start** from `/defaults/labwc.xml`, then applies a few env-driven sed tweaks (`NO_FULL=true` is set by default and strips the wildcard maximize rule). Editing `~/zotero/.config/labwc/rc.xml` directly is *not* persistent across container recreations. If you ever need to customize labwc here, bind-mount a replacement over `/defaults/labwc.xml:ro` in compose so the init `cp` picks up your version.
 
 **Live reload of labwc**: after editing rc.xml at runtime, `docker exec zotero pkill -HUP labwc` reloads the config. Already-mapped windows keep their existing rules — rules are reapplied only when a window is newly created, so kill the affected app and relaunch it for changes to bite.
 
@@ -303,7 +308,7 @@ How to attach a file, and the quirks the MCP layer carries. Script reference is 
 - **PDFs by URL** → use the MCP `import_attachment_url` tool. Pass `contentType: "application/pdf"` to skip the SingleFile snapshot path. Works for any HTTPS URL, including signed-token download URLs from logged-in browser sessions.
 - **Local text/markdown/HTML files** → the MCP rejects `file://`, `127.0.0.1`, and RFC-1918 addresses, and binding a temp HTTP server to the public interface needs firewall coordination. Use `./scripts/zotero_attach_text.sh <itemKey> <file> [title] [tag1,tag2,...]` instead — it streams the file straight into `add_note` over the local MCP HTTP socket, so the contents never enter the model's context. The note ends up as a child of `itemKey`, wrapped in `<pre>` so whitespace renders.
 - **Local PDFs (binary)** → `import_local_files(mcp, jobs, host_ip)` in `zotero_mcp.py` — copies each to a throwaway dir, serves it only for the import, and tears down. Literal RFC1918 URLs are rejected by the plugin, so private IPv4 hosts use `<ip>.nip.io` as a DNS alias back to the same machine; no file is sent to nip.io. `jobs` = `[(local_path, parentItemKey, title)]`.
-- **Sanity-check downloads.** Zotero stores attachments at `config/Zotero/storage/<attachmentKey>/`. `file storage/<key>/*` quickly confirms whether you got a real PDF or a sign-in HTML page.
+- **Sanity-check downloads.** Zotero stores attachments at `~/zotero/Zotero/storage/<attachmentKey>/`. `file storage/<key>/*` quickly confirms whether you got a real PDF or a sign-in HTML page.
 
 - **Zotero MCP body cap.** Requests over ~3700 bytes return `-32700 Parse error` (misleading). `discover.py`'s `cap_abstract` shrinks `abstractNote` until the payload fits, with `ensure_ascii=False` to keep non-Latin text compact — reuse it for any call that carries long text.
 - **`get_collection_items` overflows the tool-result token limit at >~30 items.** The MCP auto-saves the full JSON to a file and tells you the path — `grep -oE '"key": "[A-Z0-9]+"'` that file instead of asking the model to read it whole.
@@ -313,7 +318,7 @@ How to attach a file, and the quirks the MCP layer carries. Script reference is 
 - **`add_note` also 400s with `-32700 Parse error` on some inputs**, and it is *not* a size limit — 130 KB notes go through while a 5 KB one fails, and bisecting the same file gives a boundary that drifts with unrelated edits. Don't chase it: restructure the file (fold a small extract into a larger document that already attaches, or split into two notes) and move on. Budget one retry, not an investigation.
 - **Cyrillic filenames break `import_attachment_url`** with `Invalid attachment URL` — the URL string is validated as ASCII. `import_local_files` now sanitises staging names, so the failure only reappears if you build the URL yourself. The attachment is titled from the `title` argument anyway, so the staged name never matters.
 - **`search_library` with a collection-only filter throws `TypeError: value.includes`.** Use `get_collection_items` and grep its overflow file.
-- **Verify Zotero writes via the SQLite DB, not the MCP.** `config/Zotero/zotero.sqlite` is host-visible; open read-only (`file:…?mode=ro&immutable=1`) and count `itemAttachments`/`itemNotes` by `parentItemID`. Far cheaper than `get_item_details` (which dumps every attached note body — millions of chars). MCP tool envelopes always contain `isError`, so a naive `"error" in response` success-check yields false negatives — check the DB.
+- **Verify Zotero writes via the SQLite DB, not the MCP.** `~/zotero/Zotero/zotero.sqlite` is host-visible; open read-only (`file:…?mode=ro&immutable=1`) and count `itemAttachments`/`itemNotes` by `parentItemID`. Far cheaper than `get_item_details` (which dumps every attached note body — millions of chars). MCP tool envelopes always contain `isError`, so a naive `"error" in response` success-check yields false negatives — check the DB.
 
 ## Troubleshooting
 
@@ -323,4 +328,4 @@ How to attach a file, and the quirks the MCP layer carries. Script reference is 
 | Web UI is black / disconnects | Browser needs HTTPS for WebCodecs; accept the self-signed cert. `docker logs zotero \| grep -i error`. |
 | Chromium MCPs can't connect | Run `./scripts/launch_chromium.sh` after every container restart. Verify `curl http://127.0.0.1:9222/json/version`. |
 | Container won't start: "port already in use" | Something on the host is on 8888, 9222, 23120, or 23119. With host networking, the container can't relocate. Find and stop the culprit. |
-| `docker exec zotero` runs but Chromium silently dies | Singleton lock. The launch script clears it; if you hand-launch, remove `config/.chromium-debug/Singleton*`. |
+| `docker exec zotero` runs but Chromium silently dies | Singleton lock. The launch script clears it; if you hand-launch, remove `~/zotero/.chromium-debug/Singleton*`. |

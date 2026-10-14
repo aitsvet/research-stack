@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Swap the live Zotero DBs with the snapshots from config/Zotero/.snapshot/
+# Swap the live Zotero DBs with the snapshots from $ZOTERO_HOME/Zotero/.snapshot/
 # and verify. Runs ON THE REPLICA (normally over ssh from sync_library.sh)
 # while its zotero container is stopped. The previous DB is kept as *.prev.
 #
@@ -7,7 +7,8 @@
 
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-Z="$ROOT/config/Zotero"
+if [ -f "$ROOT/.env" ]; then set -a; . "$ROOT/.env"; set +a; fi
+Z="${ZOTERO_HOME:-$HOME/zotero}/Zotero"
 want="${1-}"
 PYTHON="$ROOT/.venv/bin/python"
 

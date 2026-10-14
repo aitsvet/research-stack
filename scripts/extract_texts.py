@@ -32,7 +32,7 @@ e.g. a .docx converter) are never overwritten by `<collectionKey>` or `refresh`.
 
 Env:
   ZOTERO_MCP_TOKEN  required for collection mode.
-  ZOTERO_STORAGE    path to Zotero `storage/` dir (default ~/research-stack/config/Zotero/storage).
+  ZOTERO_STORAGE    path to Zotero `storage/` dir (default $ZOTERO_HOME/Zotero/storage, ZOTERO_HOME defaulting to ~/zotero).
   DISCOVERY_OUT     output dir parent (default ~/research-stack/.discovery).
 """
 import json, os, re, sys, subprocess, glob
@@ -40,7 +40,7 @@ import acqlog
 
 SEP_DASHES = 48  # marker-compatible page rule width
 ZSTORE  = os.environ.get("ZOTERO_STORAGE",
-                         os.path.expanduser("~/research-stack/config/Zotero/storage"))
+                         os.path.join(os.path.expanduser(os.environ.get("ZOTERO_HOME", "~/zotero")), "Zotero", "storage"))
 DISC    = os.environ.get("DISCOVERY_OUT", os.path.expanduser("~/research-stack/.discovery"))
 OUTDIR  = os.path.join(DISC, "text")
 

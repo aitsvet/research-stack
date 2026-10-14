@@ -6,8 +6,8 @@ container's Chromium — a real engine measures the text and aligns the boxes.
 Sibling of scripts/cdp_eval.py, same CDP-on-:9222 infra, but without output
 truncation and with its own page (does not disturb the research tab).
 
-The HTML must live under research-stack/config/ (mounted as /config in the
-container), so pass container paths:
+The HTML must live under the Zotero data dir ($ZOTERO_HOME, default ~/zotero,
+mounted as /config in the container), so pass container paths:
 
   harvest.py file:///config/deck-harness/sample.html out.json [--shot page.png]
 

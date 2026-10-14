@@ -8,6 +8,8 @@
 # Variables:
 #   SYNC_REPLICA       ssh address of the replica. Empty = local-path test.
 #   SYNC_REPLICA_ROOT  research-stack path on replica (default: research-stack).
+#   SYNC_REPLICA_ZOTERO  replica's Zotero data dir, its ZOTERO_HOME (default: zotero,
+#                      i.e. ~/zotero). The local one is ZOTERO_HOME (default ~/zotero).
 #   SYNC_SSH_KEY       optional identity file.
 #   SYNC_SSH_JUMP      preferred jump host.
 #   SYNC_SSH_FALLBACK_JUMP  fallback jump; "config" (default) means use the
@@ -42,6 +44,8 @@ fi
 
 REPLICA="${SYNC_REPLICA-}"
 RROOT="${SYNC_REPLICA_ROOT:-research-stack}"
+RZH="${SYNC_REPLICA_ZOTERO:-zotero}"
+ZH="${ZOTERO_HOME:-$HOME/zotero}"
 SYNC="$ROOT/.sync"
 BACKUP_DIR="${SYNC_BACKUP_DIR:-$SYNC/backup}"
 BACKUP_STORAGE="${SYNC_BACKUP_STORAGE:-1}"
@@ -119,6 +123,9 @@ rsh() {
 rpath() {
   if [ -n "$REPLICA" ]; then echo "$REPLICA:$RROOT"; else echo "$RROOT"; fi
 }
+rzpath() {
+  if [ -n "$REPLICA" ]; then echo "$REPLICA:$RZH"; else echo "$RZH"; fi
+}
 
 # Only the exact zotero container is paused/stopped. Compose siblings are never
 # created or started by this workflow.
@@ -173,8 +180,8 @@ fi
 have_replica_db=""
 mkdir -p "$SYNC/replica"
 rm -f "$SYNC/replica/zotero.sqlite-journal"
-if rsync -azc --partial "$(rpath)/config/Zotero/zotero.sqlite" "$SYNC/replica/"; then
-  rsync -azc --partial "$(rpath)/config/Zotero/zotero.sqlite-journal" \
+if rsync -azc --partial "$(rzpath)/Zotero/zotero.sqlite" "$SYNC/replica/"; then
+  rsync -azc --partial "$(rzpath)/Zotero/zotero.sqlite-journal" \
     "$SYNC/replica/" 2>/dev/null || true
   have_replica_db=1
 else
@@ -187,7 +194,7 @@ if [ -n "$dry_paused" ]; then
 fi
 
 # First fill is an exact replica copy and establishes the common ancestor.
-if [ ! -f "$ROOT/config/Zotero/zotero.sqlite" ]; then
+if [ ! -f "$ZH/Zotero/zotero.sqlite" ]; then
   [ -n "$have_replica_db" ] || { echo "no DB on either peer" >&2; exit 1; }
   if [ ${#DRY[@]} -gt 0 ]; then
     echo "==> dry-run: origin is empty — a real run would first-fill it"
@@ -198,12 +205,12 @@ if [ ! -f "$ROOT/config/Zotero/zotero.sqlite" ]; then
     docker stop zotero >/dev/null
     local_was=1
   fi
-  mkdir -p "$ROOT/config"
+  mkdir -p "$ZH"
   rsync -az --partial --delete --info=stats1 --exclude '*.bak' --exclude '*.prev' \
-    "$(rpath)/config/Zotero/" "$ROOT/config/Zotero/"
+    "$(rzpath)/Zotero/" "$ZH/Zotero/"
   rsync -az --partial --delete --info=stats1 \
-    "$(rpath)/config/.zotero/" "$ROOT/config/.zotero/" 2>/dev/null || true
-  "$PYTHON" - "$ROOT/config/Zotero/zotero.sqlite" <<'PY'
+    "$(rzpath)/.zotero/" "$ZH/.zotero/" 2>/dev/null || true
+  "$PYTHON" - "$ZH/Zotero/zotero.sqlite" <<'PY'
 import sqlite3, sys
 con = sqlite3.connect(sys.argv[1])
 ok = con.execute('PRAGMA integrity_check').fetchone()[0]
@@ -212,10 +219,10 @@ if ok != 'ok': sys.exit(f'integrity_check: {ok}')
 print(f'origin filled: integrity ok, items: {n}')
 PY
   mkdir -p "$BACKUP_DIR" "$BASE_DIR"
-  cp -a "$ROOT/config/Zotero/zotero.sqlite" "$BASE"
+  cp -a "$ZH/Zotero/zotero.sqlite" "$BASE"
   if [ "$BACKUP_STORAGE" = 1 ]; then
     rsync -az --delete --info=stats1 \
-      "$ROOT/config/Zotero/storage/" "$BACKUP_DIR/storage/"
+      "$ZH/Zotero/storage/" "$BACKUP_DIR/storage/"
   fi
   if [ -n "$local_was" ]; then docker start zotero >/dev/null; local_was=""; fi
   echo "==> done"
@@ -243,7 +250,7 @@ echo "==> three-way fast-forward plan"
 base_arg=()
 if [ -f "$BASE" ]; then base_arg=(--base "$BASE"); fi
 "$PYTHON" ./scripts/merge_replica.py plan \
-  --origin "$ROOT/config/Zotero/.snapshot/zotero.sqlite" \
+  --origin "$ZH/Zotero/.snapshot/zotero.sqlite" \
   --replica "$SYNC/replica/zotero.sqlite" "${base_arg[@]}" \
   --out "$SYNC/plan.json"
 
@@ -262,9 +269,9 @@ fi
 
 if [ "$mode" = replica_fast_forward ]; then
   echo "==> replica is authoritative; pulling storage without deleting local cache"
-  mkdir -p "$ROOT/config/Zotero/storage"
+  mkdir -p "$ZH/Zotero/storage"
   rsync -az --partial "${DRY[@]}" --info=stats1 \
-    "$(rpath)/config/Zotero/storage/" "$ROOT/config/Zotero/storage/"
+    "$(rzpath)/Zotero/storage/" "$ZH/Zotero/storage/"
   if [ ${#DRY[@]} -gt 0 ]; then
     echo "==> dry-run: replica snapshot would replace the unchanged origin; no push performed"
     exit 0
@@ -276,9 +283,9 @@ if [ "$mode" = replica_fast_forward ]; then
   fi
   # No separate pre-fast-forward copy: $BASE still holds the last state both
   # peers accepted, so it is the rollback point until the base advances below.
-  mkdir -p "$ROOT/config/Zotero/.snapshot"
-  rm -f "$ROOT/config/Zotero/.snapshot/zotero.sqlite"{,-journal,-wal,-shm}
-  cp -a "$SYNC/replica/zotero.sqlite" "$ROOT/config/Zotero/.snapshot/zotero.sqlite"
+  mkdir -p "$ZH/Zotero/.snapshot"
+  rm -f "$ZH/Zotero/.snapshot/zotero.sqlite"{,-journal,-wal,-shm}
+  cp -a "$SYNC/replica/zotero.sqlite" "$ZH/Zotero/.snapshot/zotero.sqlite"
   replica_items="$("$PYTHON" -c "import json; print(json.load(open('$SYNC/plan.json'))['stats']['replica_items'])")"
   local_phase=place
   ./scripts/place_snapshot.sh "$replica_items"
@@ -291,24 +298,24 @@ else
   echo "==> origin contains the winning snapshot"
 fi
 
-want_items="$("$PYTHON" -c "import sqlite3; c=sqlite3.connect('file:$ROOT/config/Zotero/.snapshot/zotero.sqlite?mode=ro',uri=True); print(c.execute('select count(*) from items').fetchone()[0])")"
+want_items="$("$PYTHON" -c "import sqlite3; c=sqlite3.connect('file:$ZH/Zotero/.snapshot/zotero.sqlite?mode=ro',uri=True); print(c.execute('select count(*) from items').fetchone()[0])")"
 
 # Push the winning data and snapshot, then atomically install the DB remotely.
 phase=push
-rsh "mkdir -p '$RROOT/config'"
+rsh "mkdir -p '$RZH'"
 echo "==> rsync push: data"
 rsync -az --partial --delete "${DRY[@]}" --info=stats1 \
   --exclude '/zotero.sqlite' --exclude '/zotero.sqlite-*' \
   --exclude '/zotero-mcp-vectors.sqlite' --exclude '/zotero-mcp-vectors.sqlite-*' \
   --exclude '*.bak' --exclude '*.prev' \
-  "$ROOT/config/Zotero/" "$(rpath)/config/Zotero/"
+  "$ZH/Zotero/" "$(rzpath)/Zotero/"
 
 echo "==> rsync push: profile"
 rsync -az --partial --delete "${DRY[@]}" --info=stats1 \
   --exclude '.parentlock' --exclude 'crashes/' --exclude 'datareporting/' \
   --exclude 'places.sqlite*' --exclude '*-wal' --exclude '*-shm' \
   --exclude 'Telemetry*' \
-  "$ROOT/config/.zotero/" "$(rpath)/config/.zotero/"
+  "$ZH/.zotero/" "$(rzpath)/.zotero/"
 
 if [ ${#DRY[@]} -gt 0 ]; then
   echo "==> dry-run: DB swap and common base untouched"
@@ -324,10 +331,10 @@ phase=done
 # lands in its own copy under $BASE_DIR, so the backup written above keeps
 # reflecting the library rather than the classification base.
 mkdir -p "$BACKUP_DIR" "$BASE_DIR"
-cp -a "$ROOT/config/Zotero/.snapshot/zotero.sqlite" "$BASE"
+cp -a "$ZH/Zotero/.snapshot/zotero.sqlite" "$BASE"
 if [ "$BACKUP_STORAGE" = 1 ]; then
   rsync -az --delete --info=stats1 \
-    "$ROOT/config/Zotero/storage/" "$BACKUP_DIR/storage/"
+    "$ZH/Zotero/storage/" "$BACKUP_DIR/storage/"
 fi
 
 if [ -n "$was_running" ]; then

@@ -21,7 +21,7 @@ and reports every discrepancy, in both directions:
 Usage:
     mirror_audit.py <corpus-dir> [--db PATH] [--name NAME] [--out report.md]
 
-  --db    Zotero database (default: $ZOTERO_SQLITE or config/Zotero/zotero.sqlite
+  --db    Zotero database (default: $ZOTERO_SQLITE or $ZOTERO_HOME/Zotero/zotero.sqlite, ZOTERO_HOME defaulting to ~/zotero
           beside this repo). Opened immutable, so a running Zotero is fine.
   --name  how records spell the corpus in `extra` (default: the folder name).
   --pool-below  share under which a collection counts as a discovery pool (0.5).
@@ -34,7 +34,6 @@ Exit status 1 when any discrepancy is found, so it can gate a commit.
 import argparse, os, re, sqlite3, sys
 from collections import defaultdict
 
-HERE = os.path.dirname(os.path.abspath(__file__))
 # Zotero keys: 8 chars from an alphabet without 0, 1 and O
 KEY = re.compile(r'^([2-9A-NP-Z]{8})(?:_|$)')
 
@@ -58,7 +57,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('corpus')
     ap.add_argument('--db', default=os.environ.get('ZOTERO_SQLITE',
-                    os.path.join(HERE, '..', 'config', 'Zotero', 'zotero.sqlite')))
+                    os.path.join(os.path.expanduser(os.environ.get('ZOTERO_HOME', '~/zotero')), 'Zotero', 'zotero.sqlite')))
     ap.add_argument('--name')
     ap.add_argument('--out')
     ap.add_argument('--pool-below', type=float, default=0.5)
