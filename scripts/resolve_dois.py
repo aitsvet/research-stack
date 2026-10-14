@@ -15,38 +15,15 @@ Usage: resolve_dois.py wanted.json --out-dir DIR [--mailto EMAIL]
 import argparse
 import json
 import os
-import re
 import sys
 import time
-import unicodedata
-import urllib.parse
-import urllib.request
 
-API = "https://api.crossref.org/works"
-
-
-def fold(s):
-    s = unicodedata.normalize("NFKD", s or "")
-    s = "".join(c for c in s if not unicodedata.combining(c))
-    return re.sub(r"[^a-z0-9 ]+", " ", s.lower()).strip()
+import crossref
+from textfold import words
 
 
 def toks(s):
-    return set(fold(s).split())
-
-
-def query(title, author, year, mailto, rows=5):
-    p = {"query.bibliographic": title, "rows": str(rows),
-         "select": "DOI,title,author,issued,container-title,type,score"}
-    if author:
-        p["query.author"] = author
-    url = API + "?" + urllib.parse.urlencode(p) + "&mailto=" + mailto
-    ua = "research-stack/1.0"
-    if mailto:
-        ua += " (mailto:%s)" % mailto
-    req = urllib.request.Request(url, headers={"User-Agent": ua})
-    with urllib.request.urlopen(req, timeout=45) as r:
-        return json.load(r)["message"]["items"]
+    return set(words(s))
 
 
 def best(items, want_title, want_author, want_year):
@@ -56,8 +33,8 @@ def best(items, want_title, want_author, want_year):
         t = (it.get("title") or [""])[0]
         overlap = len(wt & toks(t)) / max(len(wt), 1)
         auths = it.get("author") or []
-        first = fold(auths[0].get("family", "")) if auths else ""
-        wanted_first = fold(want_author)
+        first = " ".join(words(auths[0].get("family", ""))) if auths else ""
+        wanted_first = " ".join(words(want_author))
         # An omitted author means "no author gate", not a match on two empty
         # strings. When supplied, require a non-empty Crossref family name.
         amatch = not wanted_first or bool(first) and (
@@ -88,7 +65,7 @@ def main():
     resolved, unresolved = {}, []
     for w in wanted:
         try:
-            items = query(w["title"], w.get("author"), w.get("year"), a.mailto)
+            items = crossref.search(w["title"], w.get("author"), mailto=a.mailto)
         except Exception as e:
             print("  ERR %-26s %s" % (w["id"], e))
             unresolved.append({**w, "reason": "crossref error: %s" % e})

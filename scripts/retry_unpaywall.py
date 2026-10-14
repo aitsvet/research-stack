@@ -18,6 +18,7 @@ import json, urllib.request, urllib.parse, os, sys
 
 from zotero_mcp import MCP, result_json
 import acqlog
+from crossref import user_agent
 
 EMAIL = os.environ.get("UNPAYWALL_EMAIL") or os.environ.get("OPENALEX_EMAIL") or os.environ.get("ZOTERO_USER_EMAIL")
 if not EMAIL:
@@ -25,7 +26,7 @@ if not EMAIL:
 
 def unpaywall(doi):
     url = f"https://api.unpaywall.org/v2/{urllib.parse.quote(doi, safe='/')}?email={EMAIL}"
-    req = urllib.request.Request(url, headers={"User-Agent":f"research-stack/1.0 (mailto:{EMAIL})"})
+    req = urllib.request.Request(url, headers={"User-Agent": user_agent(EMAIL)})
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             return json.loads(r.read().decode("utf-8"))

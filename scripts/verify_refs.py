@@ -43,12 +43,9 @@ import os
 import re
 import sys
 import time
-import unicodedata
-import urllib.parse
-import urllib.request
 
-EMAIL = os.environ.get("OPENALEX_EMAIL") or os.environ.get("ZOTERO_USER_EMAIL", "")
-UA = f"research-stack/1.0 (mailto:{EMAIL})" if EMAIL else "research-stack/1.0"
+import crossref
+from textfold import fold, words
 
 # DOI pattern from https://www.crossref.org/blog/dois-and-matching-regular-expressions/
 DOI_RE = re.compile(r"\b10\.\d{4,9}/[^\s\"'<>{}()\[\]]+", re.IGNORECASE)
@@ -65,35 +62,14 @@ study trends bibliometric literature systematic preprint
 """.split())
 
 
-def fetch_crossref(doi: str, max_attempts: int = 3, delay: float = 1.0):
-    url = f"https://api.crossref.org/works/{urllib.parse.quote(doi, safe='/.()')}"
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
-    last_err = None
-    for attempt in range(max_attempts):
-        try:
-            with urllib.request.urlopen(req, timeout=20) as r:
-                return json.load(r)["message"]
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
-                return None  # not-found
-            last_err = e
-        except Exception as e:
-            last_err = e
-        time.sleep(delay)
-        delay *= 2
-    raise last_err if last_err else RuntimeError("crossref unreachable")
-
-
-def fold(s: str) -> str:
-    """Lowercase and strip diacritics so accented names/titles match (Bölte -> bolte)."""
-    s = unicodedata.normalize("NFKD", s or "")
-    return "".join(c for c in s if not unicodedata.combining(c)).lower()
+def fetch_crossref(doi: str):
+    return crossref.work(doi)
 
 
 def tokenize(s: str) -> set[str]:
     """Diacritic-folded word tokens of length >= 3, minus stopwords."""
     return {
-        t for t in re.findall(r"[a-zа-я0-9]+", fold(s))
+        t for t in words(s)
         if len(t) >= 3 and t not in STOPWORDS
     }
 

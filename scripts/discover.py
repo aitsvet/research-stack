@@ -40,8 +40,8 @@ from xml.etree import ElementTree as ET
 from zotero_mcp import MCP
 import acqlog
 
-EMAIL  = os.environ.get("OPENALEX_EMAIL") or os.environ.get("ZOTERO_USER_EMAIL", "")
-UA     = f"research-stack/1.0 (mailto:{EMAIL})" if EMAIL else "research-stack/1.0"
+import crossref
+from crossref import EMAIL, UA
 OUTDIR = os.environ.get("DISCOVERY_OUT", os.path.expanduser("~/research-stack/.discovery"))
 os.makedirs(OUTDIR, exist_ok=True)
 
@@ -268,10 +268,8 @@ def md_table(cands, topic):
 # ----------------------------- DOI-list mode -------------------------------
 
 def crossref_lookup(doi):
-    url = f"https://api.crossref.org/works/{urllib.parse.quote(doi, safe='/.()')}"
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
     try:
-        return http_json(req)["message"]
+        return crossref.work(doi)
     except Exception:
         return None
 
