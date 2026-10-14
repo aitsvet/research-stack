@@ -9,12 +9,23 @@ CDP = os.environ.get("CDP_URL", "http://127.0.0.1:9222")
 
 
 class Browser:
-    def __init__(self, timeout=40):
-        d = json.load(urllib.request.urlopen(CDP + "/json", timeout=5))
-        pages = [t for t in d if t["type"] == "page"]
-        if not pages:
-            sys.exit("no page target on %s — is chromium running?" % CDP)
-        self.ws = websocket.create_connection(pages[0]["webSocketDebuggerUrl"],
+    """Attach to the first page target, or with new_tab=True to a fresh tab of
+    its own (closed again by close()) so the research tab is left alone."""
+    def __init__(self, timeout=40, new_tab=False):
+        self.target_id = None
+        if new_tab:
+            # data=b"" forces Content-Length: 0 — Chromium's DevTools endpoint
+            # otherwise waits for a body on PUT and the request times out.
+            page = json.load(urllib.request.urlopen(urllib.request.Request(
+                CDP + "/json/new?about:blank", data=b"", method="PUT"), timeout=5))
+            self.target_id = page["id"]
+        else:
+            d = json.load(urllib.request.urlopen(CDP + "/json", timeout=5))
+            pages = [t for t in d if t["type"] == "page"]
+            if not pages:
+                sys.exit("no page target on %s — is chromium running?" % CDP)
+            page = pages[0]
+        self.ws = websocket.create_connection(page["webSocketDebuggerUrl"],
                                               max_size=None, timeout=timeout)
         self._id = 0
         self.cmd("Runtime.enable"); self.cmd("Page.enable")
@@ -26,6 +37,13 @@ class Browser:
             m = json.loads(self.ws.recv())
             if m.get("id") == mid: return m
 
+    def call(self, method, **params):
+        """Like cmd(), but returns the result and raises on a protocol error."""
+        m = self.cmd(method, **params)
+        if "error" in m:
+            raise RuntimeError(f"{method}: {m['error']}")
+        return m["result"]
+
     def evaluate(self, expr):
         r = self.cmd("Runtime.evaluate", expression=expr, returnByValue=True, awaitPromise=True)
         return r.get("result", {}).get("result", {})
@@ -34,7 +52,11 @@ class Browser:
         return self.evaluate(expr).get("value")
 
     def close(self):
-        self.ws.close()
+        try:
+            if self.target_id:
+                urllib.request.urlopen(CDP + "/json/close/" + self.target_id, timeout=5)
+        finally:
+            self.ws.close()
 
 
 if __name__ == "__main__":

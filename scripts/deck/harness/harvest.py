@@ -3,8 +3,8 @@
 
 The layout is authored as HTML (see tokens.css) and laid out by the zotero
 container's Chromium — a real engine measures the text and aligns the boxes.
-Sibling of scripts/cdp_eval.py, same CDP-on-:9222 infra, but without output
-truncation and with its own page (does not disturb the research tab).
+Drives Chromium through scripts/cdp_eval.Browser in a tab of its own (does not
+disturb the research tab), without the CLI's output truncation.
 
 The HTML must live under the Zotero data dir ($ZOTERO_HOME, default ~/zotero,
 mounted as /config in the container), so pass container paths:
@@ -18,10 +18,12 @@ Slides are elements with class "slide".
 import argparse
 import base64
 import json
+import os
+import sys
 import time
-import urllib.request
 
-import websocket
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+from cdp_eval import Browser  # noqa: E402
 
 HARVEST_JS = r"""
 (() => {
@@ -52,37 +54,6 @@ HARVEST_JS = r"""
 """
 
 
-class CDP:
-    def __init__(self, port=9222):
-        self.port = port
-        self._id = 0
-        # data=b"" forces Content-Length: 0 — Chromium's DevTools endpoint
-        # otherwise waits for a body on PUT and the request times out.
-        new = json.load(urllib.request.urlopen(urllib.request.Request(
-            f"http://127.0.0.1:{port}/json/new?about:blank", data=b"", method="PUT"),
-            timeout=5))
-        self.target_id = new["id"]
-        self.ws = websocket.create_connection(
-            new["webSocketDebuggerUrl"], max_size=None, timeout=60)
-
-    def cmd(self, method, **params):
-        self._id += 1
-        self.ws.send(json.dumps({"id": self._id, "method": method, "params": params}))
-        while True:
-            m = json.loads(self.ws.recv())
-            if m.get("id") == self._id:
-                if "error" in m:
-                    raise RuntimeError(f"{method}: {m['error']}")
-                return m["result"]
-
-    def close(self):
-        try:
-            urllib.request.urlopen(
-                f"http://127.0.0.1:{self.port}/json/close/{self.target_id}", timeout=5)
-        finally:
-            self.ws.close()
-
-
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -92,13 +63,11 @@ def main():
     ap.add_argument("--wait", type=float, default=2.0)
     a = ap.parse_args()
 
-    cdp = CDP()
+    cdp = Browser(new_tab=True)
     try:
-        cdp.cmd("Page.enable")
-        cdp.cmd("Runtime.enable")
-        cdp.cmd("Page.navigate", url=a.url)
+        cdp.call("Page.navigate", url=a.url)
         time.sleep(a.wait)  # file:// + local fonts settle fast
-        r = cdp.cmd("Runtime.evaluate", expression=HARVEST_JS, returnByValue=True)
+        r = cdp.call("Runtime.evaluate", expression=HARVEST_JS, returnByValue=True)
         slides = json.loads(r["result"]["value"])
         with open(a.out, "w", encoding="utf-8") as f:
             json.dump(slides, f, ensure_ascii=False, indent=1)
@@ -106,9 +75,9 @@ def main():
               f"{sum(len(s['els']) for s in slides)} elements -> {a.out}")
         if a.shot:
             first = slides[0]
-            cdp.cmd("Emulation.setDeviceMetricsOverride", width=int(first["w"]),
+            cdp.call("Emulation.setDeviceMetricsOverride", width=int(first["w"]),
                     height=int(first["h"]), deviceScaleFactor=1, mobile=False)
-            shot = cdp.cmd("Page.captureScreenshot", format="png")
+            shot = cdp.call("Page.captureScreenshot", format="png")
             with open(a.shot, "wb") as f:
                 f.write(base64.b64decode(shot["data"]))
             print(f"screenshot -> {a.shot}")
