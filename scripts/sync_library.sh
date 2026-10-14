@@ -20,6 +20,7 @@
 #                      in .sync/config.env to survive losing the checkout):
 #                        zotero.sqlite       — the library backup proper
 #                        storage/            — its attachment copy
+#                        replica/            — fetched peer DB (transient)
 #                        base/zotero.sqlite  — a SEPARATE copy: the last
 #                                             snapshot both peers accepted
 #   SYNC_BACKUP_STORAGE  set to 0 to keep attachment files only in live storage
@@ -48,6 +49,7 @@ RZH="${SYNC_REPLICA_ZOTERO:-zotero}"
 ZH="${ZOTERO_HOME:-$HOME/zotero}"
 SYNC="$ROOT/.sync"
 BACKUP_DIR="${SYNC_BACKUP_DIR:-$SYNC/backup}"
+REPLICA_DB_DIR="$BACKUP_DIR/replica"   # fetched peer DB, kept beside the backup
 BACKUP_STORAGE="${SYNC_BACKUP_STORAGE:-1}"
 case "$BACKUP_STORAGE" in 0|1) ;; *) echo "SYNC_BACKUP_STORAGE must be 0 or 1" >&2; exit 2 ;; esac
 BASE_DIR="$BACKUP_DIR/base"
@@ -178,11 +180,11 @@ if [ -n "$was_running" ]; then
 fi
 
 have_replica_db=""
-mkdir -p "$SYNC/replica"
-rm -f "$SYNC/replica/zotero.sqlite-journal"
-if rsync -azc --partial "$(rzpath)/Zotero/zotero.sqlite" "$SYNC/replica/"; then
+mkdir -p "$REPLICA_DB_DIR"
+rm -f "$REPLICA_DB_DIR/zotero.sqlite-journal"
+if rsync -azc --partial "$(rzpath)/Zotero/zotero.sqlite" "$REPLICA_DB_DIR/"; then
   rsync -azc --partial "$(rzpath)/Zotero/zotero.sqlite-journal" \
-    "$SYNC/replica/" 2>/dev/null || true
+    "$REPLICA_DB_DIR/" 2>/dev/null || true
   have_replica_db=1
 else
   echo "==> replica has no DB yet"
@@ -239,7 +241,7 @@ if [ -z "$have_replica_db" ]; then
 fi
 
 # Roll back a fetched hot journal, then verify before comparison.
-"$PYTHON" - "$SYNC/replica/zotero.sqlite" <<'PY'
+"$PYTHON" - "$REPLICA_DB_DIR/zotero.sqlite" <<'PY'
 import sqlite3, sys
 con = sqlite3.connect(sys.argv[1])
 ok = con.execute('PRAGMA integrity_check').fetchone()[0]
@@ -251,7 +253,7 @@ base_arg=()
 if [ -f "$BASE" ]; then base_arg=(--base "$BASE"); fi
 "$PYTHON" ./scripts/merge_replica.py plan \
   --origin "$ZH/Zotero/.snapshot/zotero.sqlite" \
-  --replica "$SYNC/replica/zotero.sqlite" "${base_arg[@]}" \
+  --replica "$REPLICA_DB_DIR/zotero.sqlite" "${base_arg[@]}" \
   --out "$SYNC/plan.json"
 
 if ! "$PYTHON" -c "import json,sys; s=json.load(open('$SYNC/plan.json'))['stats']; sys.exit(1 if s['origin_items']<10 and s['replica_items']>100 else 0)"; then
@@ -285,7 +287,7 @@ if [ "$mode" = replica_fast_forward ]; then
   # peers accepted, so it is the rollback point until the base advances below.
   mkdir -p "$ZH/Zotero/.snapshot"
   rm -f "$ZH/Zotero/.snapshot/zotero.sqlite"{,-journal,-wal,-shm}
-  cp -a "$SYNC/replica/zotero.sqlite" "$ZH/Zotero/.snapshot/zotero.sqlite"
+  cp -a "$REPLICA_DB_DIR/zotero.sqlite" "$ZH/Zotero/.snapshot/zotero.sqlite"
   replica_items="$("$PYTHON" -c "import json; print(json.load(open('$SYNC/plan.json'))['stats']['replica_items'])")"
   local_phase=place
   ./scripts/place_snapshot.sh "$replica_items"

@@ -24,6 +24,10 @@ Run commands from the research-stack root and use `./.venv/bin/python`.
   not create a second local attachment tree; attachment backups are managed
   separately. Keep the configured single live attachment tree intact.
 
+  Every database copy the workflow fetches or tests — a peer's DB under
+  `replica/`, base candidates under `candidates/` — also goes under
+  `$SYNC_BACKUP_DIR`, never in the checkout's `.sync/`.
+
   Advancing the base never rewrites the backup; refreshing the backup never
   invalidates the base. Unequal non-empty peers without a trustworthy base are a
   conflict, not a direction guess. Because the base advances only after both
@@ -199,8 +203,8 @@ A finished run is not a finished job. After any sync or recovery:
 1. Run the verification gate below (stopped snapshots, live API spot-check,
    manifests on both peers diffed clean).
 2. Only after the gate passes, remove transient transfer artefacts:
-   `.sync/replica/` (fetched DB copies), `.sync/candidates/` (base candidates
-   being tested), stray `.sync/ssh-*` control sockets, `/tmp` plans and
+   `$SYNC_BACKUP_DIR/replica/` (fetched DB copies), `$SYNC_BACKUP_DIR/candidates/`
+   (base candidates being tested), stray `.sync/ssh-*` control sockets, `/tmp` plans and
    manifests from the session, plus superseded `.sync/snap*.txt`. Do **not**
    delete either copy in `$SYNC_BACKUP_DIR` — `zotero.sqlite` + `storage/` (the
    backup) or `base/zotero.sqlite` (the common base) — nor
