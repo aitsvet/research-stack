@@ -49,6 +49,8 @@ import re
 import sys
 import zipfile
 
+import docxpkg
+
 TNR = '<w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:eastAsia="Times New Roman" />'
 SECT = ('<w:sectPr><w:pgSz w:w="11906" w:h="16838" w:orient="portrait" />'
         '<w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" />'
@@ -225,31 +227,21 @@ def build(md_path, template, out_path, image_cm):
     else:
         st = None
 
-    with zipfile.ZipFile(out_path, 'w', zipfile.ZIP_DEFLATED) as out:
-        for n in zt.namelist():
-            if n == 'word/document.xml':
-                out.writestr(n, doc.encode('utf8'))
-            elif n == 'media/image.png' and figure:
-                out.writestr(n, open(figure, 'rb').read())
-            elif fn and n == 'word/footnotes.xml':
-                out.writestr(n, fn.encode('utf8'))
-            elif st and n == 'word/styles.xml':
-                out.writestr(n, st.encode('utf8'))
-            elif core and n == 'docProps/core.xml':
-                out.writestr(n, core.encode('utf8'))
-            else:
-                out.writestr(n, zt.read(n))
+    parts = {'word/document.xml': doc}
+    if figure:
+        parts['media/image.png'] = open(figure, 'rb').read()
+    for name, text in (('word/footnotes.xml', fn), ('word/styles.xml', st),
+                       ('docProps/core.xml', core)):
+        if text:
+            parts[name] = text
+    docxpkg.write(template, out_path, parts)
     return len(paras), adviser, figure
 
 
 def check(md_path, out_path):
     import difflib
-    x = zipfile.ZipFile(out_path).read('word/document.xml').decode('utf8')
-    got = []
-    for p in re.findall(r'<w:p\b.*?</w:p>', x, re.S):
-        t = ''.join(re.findall(r'<w:t[^>]*>(.*?)</w:t>', p, re.S))
-        t = t.replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>')
-        got.append('IMG' if '<w:drawing' in p else t.strip())
+    got = ['IMG' if '<w:drawing' in p else t
+           for t, p in docxpkg.paragraphs(docxpkg.part(out_path))]
 
     def clean(s):
         s = s.strip()

@@ -28,6 +28,8 @@ import sys
 import zipfile
 import zlib
 
+import docxpkg
+
 
 def placeholder_png():
     def chunk(tag, data):
@@ -65,11 +67,9 @@ def strip(src, dst):
     if 'media/image.png' in z.namelist():
         parts['media/image.png'] = placeholder_png()
 
-    with zipfile.ZipFile(dst, 'w', zipfile.ZIP_DEFLATED) as out:
-        for n in z.namelist():
-            out.writestr(n, parts.get(n, z.read(n)))
+    docxpkg.write(src, dst, parts)
 
-    left = zipfile.ZipFile(dst).read('word/document.xml').decode('utf8')
+    left = docxpkg.part(dst)
     words = len(re.findall(r'<w:t[^>]*>([^<]+)</w:t>', left))
     print(f'{dst}: {len(z.namelist())} parts, {words} text runs left in the body')
 

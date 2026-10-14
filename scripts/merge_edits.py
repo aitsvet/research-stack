@@ -47,7 +47,8 @@ import re
 import subprocess
 import sys
 import tempfile
-import zipfile
+
+import docxpkg
 
 REF = re.compile(r"\[\d+(?:\s*[;,–—-]\s*\d+)*\]")
 WS = re.compile(r"\s+")
@@ -91,14 +92,7 @@ def from_markdown(text):
 
 def from_docx(path):
     """Paragraph text straight out of the package — no LibreOffice round trip needed."""
-    xml = zipfile.ZipFile(path).read("word/document.xml").decode("utf-8")
-    out = []
-    for p in re.findall(r"<w:p[ >].*?</w:p>", xml, re.S):
-        t = "".join(re.findall(r"<w:t[^>]*>(.*?)</w:t>", p, re.S))
-        t = t.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").strip()
-        if t:
-            out.append(Para(t))
-    return out
+    return [Para(t) for t, _ in docxpkg.paragraphs(docxpkg.part(path)) if t]
 
 
 def from_office(path, stack):
