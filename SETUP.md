@@ -328,4 +328,5 @@ How to attach a file, and the quirks the MCP layer carries. Script reference is 
 | Web UI is black / disconnects | Browser needs HTTPS for WebCodecs; accept the self-signed cert. `docker logs zotero \| grep -i error`. |
 | Chromium MCPs can't connect | Run `./scripts/launch_chromium.sh` after every container restart. Verify `curl http://127.0.0.1:9222/json/version`. |
 | Container won't start: "port already in use" | Something on the host is on 8888, 9222, 23120, or 23119. With host networking, the container can't relocate. Find and stop the culprit. |
+| Web UI stalls or the tunnel drops while the mouse moves | The stream outruns the link. Defaults are already sized for a thin tunnel (1024x768, 15 fps, 1 Mbps CBR, no audio); lower `SELKIES_FPS` / raise `SELKIES_MBPS` etc. in `.env`, then `docker compose up -d zotero` and re-run `launch_chromium.sh`. Values are locked server-side, so the sidebar cannot override them. |
 | `docker exec zotero` runs but Chromium silently dies | Singleton lock. The launch script clears it; if you hand-launch, remove `~/zotero/.chromium-debug/Singleton*`. |

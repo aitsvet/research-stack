@@ -19,6 +19,25 @@ services:
       # over it (that's how the auth_basic lines get uncommented), so any
       # added comment line turns into a broken directive.
       - DISABLE_IPV6=true
+      # Stream sized for an SSH tunnel, not a LAN. The websocket stream is
+      # TCP inside SSH: anything the encoder produces beyond the link's rate
+      # queues in the tunnel until it stalls. So: fixed small screen, capped
+      # frame rate, constant bitrate instead of CRF (whose bursts on motion
+      # are the killer), short paint-over bursts, no audio/mic/gamepad.
+      # A single value (or `|locked`) locks the knob against the browser
+      # sidebar's saved settings. Raise via .env on a fast link.
+      - SELKIES_MANUAL_WIDTH=${SELKIES_WIDTH:-1024}
+      - SELKIES_MANUAL_HEIGHT=${SELKIES_HEIGHT:-768}
+      - SELKIES_ENCODER=x264enc
+      - SELKIES_FRAMERATE=${SELKIES_FPS:-15}
+      - SELKIES_ENABLE_RATE_CONTROL=true
+      - SELKIES_RATE_CONTROL_MODE=cbr
+      - SELKIES_VIDEO_BITRATE=${SELKIES_MBPS:-1}
+      - SELKIES_H264_PAINTOVER_BURST_FRAMES=2
+      - SELKIES_AUDIO_ENABLED=false|locked
+      - SELKIES_MICROPHONE_ENABLED=false|locked
+      - SELKIES_GAMEPAD_ENABLED=false|locked
+      - SELKIES_SECOND_SCREEN=false|locked
     volumes:
       # The library lives outside the checkout, so a fresh clone or a deleted
       # working tree never takes it along. Override with ZOTERO_HOME in .env.
