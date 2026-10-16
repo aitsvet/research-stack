@@ -100,6 +100,43 @@ def _para(txt):
     return txt
 
 
+_BLOCKS = ("p", "div", "table", "ul", "ol", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "pre")
+
+
+def _list(node, out, depth):
+    """A list, nested lists indented under it.
+
+    LibreOffice nests a sublist directly in the parent <ol>/<ul>, beside the
+    <li> elements rather than inside one, so every child is walked: an <li>
+    is an item (its own sublists recurse), a list is a deeper level, and
+    anything else is text that would otherwise vanish.
+    """
+    ordered = node.name == "ol"
+    pad = "   " * depth
+    try:
+        n = int(node.get("start", 1)) - 1
+    except ValueError:
+        n = 0
+    for child in node.children:
+        if isinstance(child, Tag) and child.name in ("ul", "ol"):
+            _list(child, out, depth + 1)
+            continue
+        if isinstance(child, Tag) and child.name == "li":
+            subs = [c for c in child.children if isinstance(c, Tag) and c.name in ("ul", "ol")]
+            for s in subs:
+                s.extract()
+            n += 1
+            txt = " ".join(_inline(child).replace(BR, " ").split())
+            if txt:
+                out.append(f"{pad}{f'{n}.' if ordered else '-'} {txt}")
+            for s in subs:
+                _list(s, out, depth + 1)
+            continue
+        txt = " ".join(_inline(child).replace(BR, " ").split())
+        if txt:
+            out.append(pad + txt)
+
+
 def _block(node, out):
     if isinstance(node, NavigableString):
         t = _para(str(node))
@@ -115,7 +152,7 @@ def _block(node, out):
         if txt:
             out.append("#" * lvl + " " + txt)
         return
-    if name == "p":
+    if name == "p" and not node.find(_BLOCKS):
         txt = _para(_inline(node))
         if txt:
             out.append(txt)
@@ -126,12 +163,7 @@ def _block(node, out):
             out.append(md)
         return
     if name in ("ul", "ol"):
-        ordered = name == "ol"
-        for i, li in enumerate(node.find_all("li", recursive=False), 1):
-            marker = f"{i}." if ordered else "-"
-            txt = " ".join(_inline(li).replace(BR, " ").split())
-            if txt:
-                out.append(f"{marker} {txt}")
+        _list(node, out, 0)
         return
     if name == "hr":
         out.append("---")
@@ -139,12 +171,12 @@ def _block(node, out):
     if name == "pre":
         out.append("```\n" + node.get_text() + "\n```")
         return
-    if name in ("div", "span", "tbody", "thead", "caption", "small"):
+    # "p" here holds blocks: hand-written HTML nests <p><p>…</p><ol>…</ol></p>,
+    # which html.parser keeps as written; flattening it would glue them together.
+    if name in ("p", "div", "span", "tbody", "thead", "caption", "small"):
         # container: recurse into children as blocks
         children = [c for c in node.children if isinstance(c, (Tag, NavigableString))]
-        if any(isinstance(c, Tag) and c.name in
-               ("p", "div", "table", "ul", "ol", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "pre")
-               for c in children):
+        if any(isinstance(c, Tag) and c.name in _BLOCKS for c in children):
             for c in children:
                 _block(c, out)
         else:
@@ -158,12 +190,33 @@ def _block(node, out):
         out.append(txt)
 
 
+def _close_items(soup):
+    """Close <li> elements that the source left open.
+
+    LibreOffice writes `<li><p>one</p><li><p>two</p>` without `</li>`, and
+    html.parser, unlike a browser, nests each item inside the one before it;
+    the first item would then swallow the whole list. An <li> sitting directly
+    in another <li> is moved out after it, with everything that follows it.
+    """
+    for li in soup.find_all("li"):
+        kids = list(li.children)
+        for i, kid in enumerate(kids):
+            if isinstance(kid, Tag) and kid.name == "li":
+                anchor = li
+                for moved in kids[i:]:
+                    anchor.insert_after(moved.extract())
+                    anchor = moved
+                break
+
+
 def html_to_md(html):
     soup = BeautifulSoup(html or "", "html.parser")
+    _close_items(soup)
     root = soup.body or soup
     out = []
     for child in root.children:
         _block(child, out)
     # collapse excessive blank lines
-    return "\n\n".join(b for b in (x.strip() for x in out) if b)
+    # rstrip only: the leading pad of a nested list item is its level
+    return "\n\n".join(b for b in (x.rstrip() for x in out) if b.strip())
 
