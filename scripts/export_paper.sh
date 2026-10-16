@@ -13,7 +13,7 @@
 # --name is the file stem the journal should receive (defaults to the .md stem).
 # --image-cm sets figure width (default 15).
 # --doc also writes Word 97-2003 .doc, for journals that ask for that format.
-# --pt, --line, --table-pt, --front-align, --page-numbers go to md_docx.py
+# --pt, --line, --table-pt, --front-align, --mark-fill, --page-numbers go to md_docx.py
 # (venue font size, spacing, table size, author-line alignment, page numbers).
 # --record FILE appends what was actually produced — date, file name, page count,
 # sha256 — to a committed log. The artefacts themselves are build output and stay
@@ -34,7 +34,7 @@ while [ $# -gt 0 ]; do
     --image-cm) IMAGE_CM="$2"; shift 2 ;;
     --doc)      DOC=1; shift ;;
     --record)   RECORD="$2"; shift 2 ;;
-    --pt|--line|--table-pt|--front-align) MDOPTS+=("$1" "$2"); shift 2 ;;
+    --pt|--line|--table-pt|--front-align|--mark-fill) MDOPTS+=("$1" "$2"); shift 2 ;;
     --page-numbers) MDOPTS+=("$1"); shift ;;
     -*) echo "unknown option: $1" >&2; exit 2 ;;
     *)  MD="$1"; shift ;;

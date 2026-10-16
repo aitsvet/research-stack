@@ -20,7 +20,8 @@ of the template, not of this code.
 it is the only cheap proof that the export says what the master says.
 
 Markdown handled: `# ` title, `## `/`### ` headings, `**bold**`, `*italic*`,
-`==marked==` (yellow highlight, for showing an editor what changed),
+`==marked==` (yellow highlight, or with --mark-fill a character shading of that
+colour, for showing a reader which passages are additions),
 `- ` bullets (rendered as en-dash paragraphs, the house convention),
 `![alt](fig.png)` and a `*Рис. N ...*` caption. Numbered lines get no special
 handling: `1. ` stays literal text in an ordinary body paragraph, which is what
@@ -28,7 +29,7 @@ a bibliography wants and why in-body enumerations use `- ` instead.
 
 Pipe tables (`| a | b |` rows, `|---|` separator skipped) become a bordered
 Word table: first row bold and repeated on each page, single-spaced cells at
---table-pt, column widths proportional to the text each column carries. A line
+--table-pt, column widths chosen to minimise the estimated table height. A line
 opening `Таблица N`/`Table N` is a centred caption kept with the table, and
 `Источник:`/`Source:` a flush-left note. The reference-list heading
 (`## Библиографический список`, `## Список использованных источников`,
@@ -73,6 +74,7 @@ LINE_RULE = 'auto'
 SZ = 28                 # half-points, 14 pt; --pt overrides
 TABLE_SZ = 28           # --table-pt overrides; defaults to --pt
 FRONT_JC = 'left'       # author lines in the front matter; --front-align
+MARK_FILL = None        # --mark-fill RRGGBB: shade ==marked== runs instead of highlighting
 TEXT_W = 11906 - 2 * 1134
 FOOTER_RID = 'rIdMdDocxFooter1'
 FOOTER = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -112,9 +114,14 @@ def footnote_xml(lines):
 
 
 def rpr(bold=False, italic=False, mark=False, sz=None):
-    # rPr children are order-sensitive: rFonts, b, i, sz, highlight.
+    # rPr children are order-sensitive: rFonts, b, i, sz, highlight, shd.
+    # Highlight has a fixed palette of bright colours; shading takes any fill.
+    if mark and MARK_FILL:
+        mark_xml = '<w:shd w:val="clear" w:color="auto" w:fill="%s" />' % MARK_FILL
+    else:
+        mark_xml = '<w:highlight w:val="yellow" />' if mark else ''
     return (TNR + ('<w:b />' if bold else '') + ('<w:i />' if italic else '')
-            + '<w:sz w:val="%d" />' % (sz or SZ) + ('<w:highlight w:val="yellow" />' if mark else ''))
+            + '<w:sz w:val="%d" />' % (sz or SZ) + mark_xml)
 
 
 def esc(s):
@@ -123,7 +130,7 @@ def esc(s):
 
 def runs(text, italic=False, sz=None):
     out = []
-    for chunk in re.split(r'(==[^=]+==)', text):
+    for chunk in re.split(r'(==(?:(?!==).)+==)', text):
         if not chunk:
             continue
         mark = chunk.startswith('==') and chunk.endswith('==')
@@ -153,15 +160,55 @@ def table_cells(s):
     return [c.strip() for c in s.strip().strip('|').split('|')]
 
 
-def table_xml(rows, pid):
-    """Pipe table -> w:tbl: first row a bold repeated header, single-spaced
-    cells at TABLE_SZ, column widths proportional to the text they carry."""
-    n = max(len(r) for r in rows)
-    rows = [r + [''] * (n - len(r)) for r in rows]
+def wrapped_lines(text, width):
+    """Lines a cell takes at TABLE_SZ: greedy word wrap with an average
+    Times New Roman glyph of about half an em, inside 57-twip cell margins."""
+    cap = max((width - 114) / (TABLE_SZ * 5.0), 1)
+    n, cur = 1, 0
+    for word in re.sub(r'\*\*|==', '', text).split():
+        if cur and cur + len(word) + 1 > cap:
+            n, cur = n + 1, len(word) + 1
+        else:
+            cur += len(word) + 1
+    return n
+
+
+def column_widths(rows, n):
+    """Column widths that minimise the table's estimated height (sum over rows
+    of the tallest cell). Starts from widths proportional to the text each
+    column carries and moves 1/40 of the text width between columns while that
+    shortens the table; no column drops below 0.6/n of the width."""
     weight = [max(sum(len(r[k]) for r in rows), 1) for k in range(n)]
     floor = 0.6 / n
     share = [max(w / sum(weight), floor) for w in weight]
-    widths = [int(TEXT_W * s / sum(share)) for s in share]
+    share = [x / sum(share) for x in share]
+
+    def height(sh):
+        return sum(max(wrapped_lines(c, TEXT_W * x) for c, x in zip(r, sh)) for r in rows)
+
+    best, step = height(share), 1.0 / 40
+    improved = n > 1
+    while improved:
+        improved = False
+        for i in range(n):
+            for j in range(n):
+                if i == j or share[j] - step < floor:
+                    continue
+                trial = list(share)
+                trial[i] += step
+                trial[j] -= step
+                h = height(trial)
+                if h < best:
+                    best, share, improved = h, trial, True
+    return [int(TEXT_W * x) for x in share]
+
+
+def table_xml(rows, pid):
+    """Pipe table -> w:tbl: first row a bold repeated header, single-spaced
+    cells at TABLE_SZ, column widths from column_widths()."""
+    n = max(len(r) for r in rows)
+    rows = [r + [''] * (n - len(r)) for r in rows]
+    widths = column_widths(rows, n)
     border = ''.join('<w:%s w:val="single" w:sz="4" w:space="0" w:color="000000" />' % e
                      for e in ('top', 'left', 'bottom', 'right', 'insideH', 'insideV'))
     out = ['<w:tbl><w:tblPr><w:tblW w:w="%d" w:type="dxa" /><w:tblBorders>%s</w:tblBorders>'
@@ -380,10 +427,13 @@ def main():
     ap.add_argument('--front-align', choices=('left', 'right'), default='left',
                     help='alignment of author lines before the first heading')
     ap.add_argument('--page-numbers', action='store_true', help='centred page number in the footer')
+    ap.add_argument('--mark-fill', metavar='RRGGBB',
+                    help='shade ==marked== text with this fill instead of yellow highlight')
     a = ap.parse_args()
     if not a.template:
         ap.error('--template (or $DOCX_TEMPLATE) is required')
-    global SZ, TABLE_SZ, LINE, FRONT_JC
+    global SZ, TABLE_SZ, LINE, FRONT_JC, MARK_FILL
+    MARK_FILL = a.mark_fill
     SZ, LINE, FRONT_JC = int(round(a.pt * 2)), int(round(a.line * 240)), a.front_align
     TABLE_SZ = int(round((a.table_pt or a.pt) * 2))
     out = a.out or os.path.splitext(a.markdown)[0] + '.docx'
