@@ -12,8 +12,8 @@ Reports:
   GAP        bibliography numbering is not 1..N contiguous
   DUPLICATE  the same number appears twice in the bibliography
 
-Body citations are pure-numeric brackets only: [5], [17; 18], [15-28], [17-19; 21]
-(hyphen or en/em dash). Prose brackets ([ст. 429.2], [Рис. 2], [Электронный
+Body citations are numeric brackets: [5], [17; 18], [15-28], [17-19; 21]
+(hyphen or en/em dash), and pinpointed ones: [12, с. 5], [9, с. 4; 2, п. 7]. Prose brackets ([ст. 429.2], [Рис. 2], [Электронный
 ресурс]) are ignored, and so is everything from the bibliography heading onward.
 
 Usage:
@@ -23,10 +23,15 @@ import argparse
 import re
 import sys
 
-DEFAULT_HEADING = r"^#+\s*(Библиографический список|Список литературы|References)"
+DEFAULT_HEADING = r"^#+\s*(Библиографический список|Список литературы|Список использованных источников|References)"
 DASH = "‐-―-"                      # hyphen plus the dash block
 ATOM = r"\d+(?:\s*[%s]\s*\d+)?" % DASH       # "12" or "15–28"
 CITE = re.compile(r"\[(%s(?:\s*;\s*%s)*)\]" % (ATOM, ATOM))
+# A pinpointed citation: [12, с. 5], [3, п. 8(e)], [9, с. 4; 2, с. 7]. Every
+# segment opens with the source number and a comma; a segment that opens with
+# a word ([7, ст. 6 ч. 3; ст. 46]) continues the previous source's pinpoint.
+PINNED = re.compile(r"\[(\d+,[^\[\]]*)\]")
+SEGMENT = re.compile(r"^\s*(\d+)\s*,")
 RANGE = re.compile(r"(\d+)\s*[%s]\s*(\d+)" % DASH)
 ENTRY = re.compile(r"^(\d+)\.\s+\S")
 
@@ -54,6 +59,11 @@ def check(path, heading_re):
     cited = set()
     for grp in CITE.findall(body):
         cited.update(expand(grp))
+    for grp in PINNED.findall(body):
+        for seg in grp.split(";"):
+            n = SEGMENT.match(seg) or re.fullmatch(r"\s*(\d+)\s*", seg)
+            if n:
+                cited.add(int(n.group(1)))
 
     listed, dupes = [], []
     for line in biblio.splitlines():

@@ -13,6 +13,8 @@
 # --name is the file stem the journal should receive (defaults to the .md stem).
 # --image-cm sets figure width (default 15).
 # --doc also writes Word 97-2003 .doc, for journals that ask for that format.
+# --pt, --line, --table-pt, --front-align, --page-numbers go to md_docx.py
+# (venue font size, spacing, table size, author-line alignment, page numbers).
 # --record FILE appends what was actually produced — date, file name, page count,
 # sha256 — to a committed log. The artefacts themselves are build output and stay
 # out of version control, so without this nothing in the repository says which
@@ -24,7 +26,7 @@
 set -euo pipefail
 
 STACK="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MD=""; TEMPLATE="${DOCX_TEMPLATE:-}"; NAME=""; IMAGE_CM=15; DOC=0; RECORD=""
+MD=""; TEMPLATE="${DOCX_TEMPLATE:-}"; NAME=""; IMAGE_CM=15; DOC=0; RECORD=""; MDOPTS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --template) TEMPLATE="$2"; shift 2 ;;
@@ -32,6 +34,8 @@ while [ $# -gt 0 ]; do
     --image-cm) IMAGE_CM="$2"; shift 2 ;;
     --doc)      DOC=1; shift ;;
     --record)   RECORD="$2"; shift 2 ;;
+    --pt|--line|--table-pt|--front-align) MDOPTS+=("$1" "$2"); shift 2 ;;
+    --page-numbers) MDOPTS+=("$1"); shift ;;
     -*) echo "unknown option: $1" >&2; exit 2 ;;
     *)  MD="$1"; shift ;;
   esac
@@ -50,7 +54,7 @@ OUT_DIR="$(dirname "$MD_ABS")"
 DOCX="$OUT_DIR/$NAME.docx"
 
 python3 "$STACK/scripts/md_docx.py" "$MD_ABS" --template "$(readlink -f "$TEMPLATE")" \
-        --out "$DOCX" --image-cm "$IMAGE_CM" --check
+        --out "$DOCX" --image-cm "$IMAGE_CM" ${MDOPTS[@]+"${MDOPTS[@]}"} --check
 
 # officecli keeps a resident per file; drop it so validate reads the new bytes.
 if command -v officecli >/dev/null 2>&1; then

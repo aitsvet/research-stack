@@ -28,7 +28,13 @@ def paragraphs(xml):
 
 def write(src, dst, parts):
     """Copy package `src` to `dst`, replacing the parts named in `parts`
-    (str or bytes); every other part is copied byte for byte, in order."""
+    (str or bytes); every other part is copied byte for byte, in order. Parts
+    that `src` lacks are appended; registering them in [Content_Types].xml and
+    the relationships is the caller's job."""
     with zipfile.ZipFile(src) as z, zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as out:
-        for n in z.namelist():
+        names = z.namelist()
+        for n in names:
             out.writestr(n, parts[n] if n in parts else z.read(n))
+        for n in parts:
+            if n not in names:
+                out.writestr(n, parts[n])

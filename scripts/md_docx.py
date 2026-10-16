@@ -26,6 +26,18 @@ Markdown handled: `# ` title, `## `/`### ` headings, `**bold**`, `*italic*`,
 handling: `1. ` stays literal text in an ordinary body paragraph, which is what
 a bibliography wants and why in-body enumerations use `- ` instead.
 
+Pipe tables (`| a | b |` rows, `|---|` separator skipped) become a bordered
+Word table: first row bold and repeated on each page, single-spaced cells at
+--table-pt, column widths proportional to the text each column carries. A line
+opening `Таблица N`/`Table N` is a centred caption kept with the table, and
+`Источник:`/`Source:` a flush-left note. The reference-list heading
+(`## Библиографический список`, `## Список использованных источников`,
+`## References`) is centred bold.
+
+Venue layout knobs: --pt (body size), --line (spacing multiple), --table-pt,
+--front-align right (author lines in the front matter), --page-numbers (a
+centred PAGE field in the footer, for venues that require numbered pages).
+
 Front matter is everything before the first `## `, and there each line is one
 paragraph. `**Name**` renders bold italic and `*text*` renders italic. The first
 name carries the footnote reference when adviser lines are present and becomes
@@ -56,8 +68,24 @@ SECT = ('<w:sectPr><w:pgSz w:w="11906" w:h="16838" w:orient="portrait" />'
         '<w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" />'
         '<w:docGrid w:type="default" /></w:sectPr>')
 INDENT = 709            # 1.25 cm first line
-LINE = 360              # 1.5 spacing
+LINE = 360              # 1.5 spacing; --line overrides
 LINE_RULE = 'auto'
+SZ = 28                 # half-points, 14 pt; --pt overrides
+TABLE_SZ = 28           # --table-pt overrides; defaults to --pt
+FRONT_JC = 'left'       # author lines in the front matter; --front-align
+TEXT_W = 11906 - 2 * 1134
+FOOTER_RID = 'rIdMdDocxFooter1'
+FOOTER = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+          '<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+          '<w:p><w:pPr><w:jc w:val="center" /></w:pPr>'
+          '<w:r><w:rPr>%s<w:sz w:val="%%d" /></w:rPr><w:fldChar w:fldCharType="begin" /></w:r>'
+          '<w:r><w:rPr>%s<w:sz w:val="%%d" /></w:rPr><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r>'
+          '<w:r><w:rPr>%s<w:sz w:val="%%d" /></w:rPr><w:fldChar w:fldCharType="separate" /></w:r>'
+          '<w:r><w:rPr>%s<w:sz w:val="%%d" /></w:rPr><w:t>1</w:t></w:r>'
+          '<w:r><w:rPr>%s<w:sz w:val="%%d" /></w:rPr><w:fldChar w:fldCharType="end" /></w:r>'
+          '</w:p></w:ftr>') % ((TNR,) * 5)
+LIST_HEADING = re.compile(r'^## (Библиографический|Список (использованных )?(источников|литературы)'
+                          r'|СПИСОК|References)', re.I)
 FRONT_LABELS = {'Аннотация', 'Abstract', 'Резюме', 'Summary'}
 FNREF = ('<w:r><w:rPr><w:rStyle w:val="FootnoteReference" />'
          '<w:vertAlign w:val="superscript" /></w:rPr>'
@@ -83,17 +111,17 @@ def footnote_xml(lines):
     return ''.join(out)
 
 
-def rpr(bold=False, italic=False, mark=False):
+def rpr(bold=False, italic=False, mark=False, sz=None):
     # rPr children are order-sensitive: rFonts, b, i, sz, highlight.
     return (TNR + ('<w:b />' if bold else '') + ('<w:i />' if italic else '')
-            + '<w:sz w:val="28" />' + ('<w:highlight w:val="yellow" />' if mark else ''))
+            + '<w:sz w:val="%d" />' % (sz or SZ) + ('<w:highlight w:val="yellow" />' if mark else ''))
 
 
 def esc(s):
     return s.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
 
-def runs(text, italic=False):
+def runs(text, italic=False, sz=None):
     out = []
     for chunk in re.split(r'(==[^=]+==)', text):
         if not chunk:
@@ -111,14 +139,67 @@ def runs(text, italic=False):
             else:
                 b, i, body = False, italic, part
             out.append('<w:r><w:rPr>%s</w:rPr><w:t xml:space="preserve">%s</w:t></w:r>'
-                       % (rpr(b, i, mark), esc(body)))
+                       % (rpr(b, i, mark, sz), esc(body)))
     return ''.join(out)
 
 
-def ppr(before=0, after=0, ind=0, jc='both'):
-    return ('<w:pPr><w:spacing w:before="%d" w:after="%d" w:line="%d" w:lineRule="%s" />'
+def ppr(before=0, after=0, ind=0, jc='both', line=None, keep_next=False):
+    return ('<w:pPr>%s<w:spacing w:before="%d" w:after="%d" w:line="%d" w:lineRule="%s" />'
             '<w:ind w:firstLine="%d" /><w:jc w:val="%s" /></w:pPr>'
-            % (before, after, LINE, LINE_RULE, ind, jc))
+            % ('<w:keepNext />' if keep_next else '', before, after, line or LINE, LINE_RULE, ind, jc))
+
+
+def table_cells(s):
+    return [c.strip() for c in s.strip().strip('|').split('|')]
+
+
+def table_xml(rows, pid):
+    """Pipe table -> w:tbl: first row a bold repeated header, single-spaced
+    cells at TABLE_SZ, column widths proportional to the text they carry."""
+    n = max(len(r) for r in rows)
+    rows = [r + [''] * (n - len(r)) for r in rows]
+    weight = [max(sum(len(r[k]) for r in rows), 1) for k in range(n)]
+    floor = 0.6 / n
+    share = [max(w / sum(weight), floor) for w in weight]
+    widths = [int(TEXT_W * s / sum(share)) for s in share]
+    border = ''.join('<w:%s w:val="single" w:sz="4" w:space="0" w:color="000000" />' % e
+                     for e in ('top', 'left', 'bottom', 'right', 'insideH', 'insideV'))
+    out = ['<w:tbl><w:tblPr><w:tblW w:w="%d" w:type="dxa" /><w:tblBorders>%s</w:tblBorders>'
+           '<w:tblLayout w:type="fixed" /><w:tblCellMar><w:left w:w="57" w:type="dxa" />'
+           '<w:right w:w="57" w:type="dxa" /></w:tblCellMar></w:tblPr><w:tblGrid>%s</w:tblGrid>'
+           % (TEXT_W, border, ''.join('<w:gridCol w:w="%d" />' % w for w in widths))]
+    for i, row in enumerate(rows):
+        out.append('<w:tr>%s' % ('<w:trPr><w:tblHeader /></w:trPr>' if i == 0 else
+                                 '<w:trPr><w:cantSplit /></w:trPr>'))
+        for w, cell in zip(widths, row):
+            text = '**%s**' % cell if i == 0 and cell else cell
+            out.append('<w:tc><w:tcPr><w:tcW w:w="%d" w:type="dxa" /></w:tcPr>'
+                       '<w:p w14:paraId="%08X" w14:textId="%08X">%s%s</w:p></w:tc>'
+                       % (w, pid, pid + 1, ppr(ind=0, jc='left', line=240), runs(text, sz=TABLE_SZ)))
+            pid += 2
+        out.append('</w:tr>')
+    out.append('</w:tbl>')
+    return ''.join(out), pid
+
+
+def add_footer(zt, parts, sect):
+    """Centred PAGE field in a default footer: the part, its relationship,
+    its content type, and a footerReference as the first child of sectPr."""
+    parts['word/footer1.xml'] = FOOTER % ((SZ,) * 5)
+    rels = parts.get('word/_rels/document.xml.rels') or zt.read('word/_rels/document.xml.rels').decode('utf8')
+    if FOOTER_RID not in rels:
+        rels = rels.replace('</Relationships>',
+                            '<Relationship Id="%s" Type="http://schemas.openxmlformats.org/officeDocument/'
+                            '2006/relationships/footer" Target="footer1.xml"/></Relationships>' % FOOTER_RID)
+    parts['word/_rels/document.xml.rels'] = rels
+    ct = zt.read('[Content_Types].xml').decode('utf8')
+    if '/word/footer1.xml' not in ct:
+        ct = ct.replace('</Types>', '<Override PartName="/word/footer1.xml" ContentType="application/'
+                        'vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/></Types>')
+    parts['[Content_Types].xml'] = ct
+    sect = sect.replace('<w:sectPr>', '<w:sectPr><w:footerReference w:type="default" r:id="%s" />'
+                        % FOOTER_RID, 1)
+    return sect.replace('w:left="1134" />', 'w:left="1134" w:header="567" w:footer="567" />', 1)
 
 
 def image_runs(name, cx, cy, rid):
@@ -142,7 +223,7 @@ def png_size(path):
         return struct.unpack('>II', fh.read(24)[16:24])
 
 
-def build(md_path, template, out_path, image_cm):
+def build(md_path, template, out_path, image_cm, page_numbers=False):
     src_dir = os.path.dirname(os.path.abspath(md_path))
     lines = io.open(md_path, encoding='utf8').read().split('\n')
     has_adviser = any(re.match(r'^\*(Научный руководитель|Scientific advis[eo]r):', raw.strip())
@@ -154,8 +235,17 @@ def build(md_path, template, out_path, image_cm):
 
     paras, adviser, figure, pid = [], [], None, 0x00100000
     front, titles, named = True, 0, False
-    for raw in lines:
+    table = []
+    for raw in lines + ['']:
         s = raw.strip()
+        if s.startswith('|'):
+            if not re.match(r'^\|[\s:|-]+\|$', s):
+                table.append(table_cells(s))
+            continue
+        if table:
+            xml, pid = table_xml(table, pid)
+            paras.append(xml)
+            table = []
         if not s:
             continue
         if re.match(r'^\*(Научный руководитель|Scientific advis[eo]r):', s):
@@ -181,17 +271,21 @@ def build(md_path, template, out_path, image_cm):
                 '**' + s[2:] + '**', italic=True)
         elif re.match(r'^\*Рис\.', s):
             p = ppr(after=120, ind=0, jc='center') + runs(s)
+        elif re.match(r'^\**(Таблица|Table) \d', s):
+            p = ppr(before=120, after=60, ind=0, jc='center', keep_next=True) + runs(s)
+        elif re.match(r'^\**(Источник|Source)\**:', s):
+            p = ppr(before=60, after=120, ind=0, jc='left') + runs(s)
         elif front and lbl and lbl.group(1) in FRONT_LABELS:
             p = ppr(before=240, ind=0, jc='left') + runs(s)
         elif front and lbl:
-            p = ppr(before=240, ind=0, jc='left') + runs(s, italic=True)
+            p = ppr(before=240, ind=0, jc=FRONT_JC) + runs(s, italic=True)
             if not named:
                 named = lbl.group(1)
                 if has_adviser:
                     p += FNREF
         elif front and s.startswith('*') and s.endswith('*'):
-            p = ppr(ind=0, jc='left') + runs(s)
-        elif re.match(r'^## Библиографический', s):
+            p = ppr(ind=0, jc=FRONT_JC) + runs(s)
+        elif LIST_HEADING.match(s):
             p = ppr(before=240, ind=0, jc='center') + runs('**' + s[3:] + '**')
         elif s.startswith('### '):
             p = ppr(before=120, ind=0, jc='left') + runs(
@@ -208,7 +302,9 @@ def build(md_path, template, out_path, image_cm):
     adviser = adviser or None
 
     head = re.match(r'^(.*?<w:body>)', zt.read('word/document.xml').decode('utf8'), re.S).group(1)
-    doc = head + ''.join(paras) + SECT + '</w:body></w:document>'
+    parts = {}
+    sect = add_footer(zt, parts, SECT) if page_numbers else SECT
+    doc = head + ''.join(paras) + sect + '</w:body></w:document>'
 
     core = None
     if named and 'docProps/core.xml' in zt.namelist():
@@ -227,7 +323,7 @@ def build(md_path, template, out_path, image_cm):
     else:
         st = None
 
-    parts = {'word/document.xml': doc}
+    parts['word/document.xml'] = doc
     if figure:
         parts['media/image.png'] = open(figure, 'rb').read()
     for name, text in (('word/footnotes.xml', fn), ('word/styles.xml', st),
@@ -254,6 +350,10 @@ def check(md_path, out_path):
         s = l.strip()
         if not s or re.match(r'^\*(Научный руководитель|Scientific advis[eo]r):', s):
             continue
+        if s.startswith('|'):
+            if not re.match(r'^\|[\s:|-]+\|$', s):
+                tgt.extend(clean(c) for c in table_cells(s))
+            continue
         tgt.append('IMG' if s.startswith('![') else clean(s))
     norm = lambda s: re.sub(r'\s+', ' ', s).strip()
     a, b = [norm(s) for s in got], [norm(s) for s in tgt]
@@ -274,11 +374,20 @@ def main():
     ap.add_argument('--out')
     ap.add_argument('--image-cm', type=float, default=15.0)
     ap.add_argument('--check', action='store_true')
+    ap.add_argument('--pt', type=float, default=14, help='body font size, pt (default 14)')
+    ap.add_argument('--line', type=float, default=1.5, help='line spacing multiple (default 1.5)')
+    ap.add_argument('--table-pt', type=float, help='table font size, pt (default: --pt)')
+    ap.add_argument('--front-align', choices=('left', 'right'), default='left',
+                    help='alignment of author lines before the first heading')
+    ap.add_argument('--page-numbers', action='store_true', help='centred page number in the footer')
     a = ap.parse_args()
     if not a.template:
         ap.error('--template (or $DOCX_TEMPLATE) is required')
+    global SZ, TABLE_SZ, LINE, FRONT_JC
+    SZ, LINE, FRONT_JC = int(round(a.pt * 2)), int(round(a.line * 240)), a.front_align
+    TABLE_SZ = int(round((a.table_pt or a.pt) * 2))
     out = a.out or os.path.splitext(a.markdown)[0] + '.docx'
-    n, adviser, figure = build(a.markdown, a.template, out, a.image_cm)
+    n, adviser, figure = build(a.markdown, a.template, out, a.image_cm, a.page_numbers)
     print('%s: %d paragraphs%s%s' % (out, n,
                                      ', adviser footnote' if adviser else '',
                                      ', figure ' + os.path.basename(figure) if figure else ''))
