@@ -177,10 +177,15 @@ def column_widths(rows, n):
     """Column widths that minimise the table's estimated height (sum over rows
     of the tallest cell). Starts from widths proportional to the text each
     column carries and moves 1/40 of the text width between columns while that
-    shortens the table; no column drops below 0.6/n of the width."""
+    shortens the table; no column drops below 0.6/n of the width or below its
+    longest word."""
     weight = [max(sum(len(r[k]) for r in rows), 1) for k in range(n)]
-    floor = 0.6 / n
-    share = [max(w / sum(weight), floor) for w in weight]
+    # a column never gets narrower than its longest word (Word would break it mid-word)
+    longest = [max(len(w) for r in rows for w in (re.sub(r'\*\*|==', '', r[k]).split() or [''])) for k in range(n)]
+    floor = [max(0.6 / n, ((m + 1) * TABLE_SZ * 5.5 + 114) / TEXT_W) for m in longest]
+    if sum(floor) > 1:
+        floor = [f / sum(floor) for f in floor]
+    share = [max(w / sum(weight), f) for w, f in zip(weight, floor)]
     share = [x / sum(share) for x in share]
 
     def height(sh):
@@ -192,7 +197,7 @@ def column_widths(rows, n):
         improved = False
         for i in range(n):
             for j in range(n):
-                if i == j or share[j] - step < floor:
+                if i == j or share[j] - step < floor[j]:
                     continue
                 trial = list(share)
                 trial[i] += step
