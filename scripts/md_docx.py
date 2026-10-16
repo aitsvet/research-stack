@@ -30,8 +30,8 @@ a bibliography wants and why in-body enumerations use `- ` instead.
 Pipe tables (`| a | b |` rows, `|---|` separator skipped) become a bordered
 Word table: first row bold and repeated on each page, single-spaced cells at
 --table-pt, column widths chosen to minimise the estimated table height. A line
-opening `Таблица N`/`Table N` is a centred caption kept with the table, and
-`Источник:`/`Source:` a flush-left note. The reference-list heading
+opening `Таблица N`/`Table N` (also behind `==` or `**` markers) is a centred caption
+kept with the table, and `Источник:`/`Source:` a flush-left note. The reference-list heading
 (`## Библиографический список`, `## Список использованных источников`,
 `## References`) is centred bold.
 
@@ -323,9 +323,9 @@ def build(md_path, template, out_path, image_cm, page_numbers=False):
                 '**' + s[2:] + '**', italic=True)
         elif re.match(r'^\*Рис\.', s):
             p = ppr(after=120, ind=0, jc='center') + runs(s)
-        elif re.match(r'^\**(Таблица|Table) \d', s):
+        elif re.match(r'^(?:\*|==)*(Таблица|Table) \d', s):
             p = ppr(before=120, after=60, ind=0, jc='center', keep_next=True) + runs(s)
-        elif re.match(r'^\**(Источник|Source)\**:', s):
+        elif re.match(r'^(?:\*|==)*(Источник|Source)\**:', s):
             p = ppr(before=60, after=120, ind=0, jc='left') + runs(s)
         elif front and lbl and lbl.group(1) in FRONT_LABELS:
             p = ppr(before=240, ind=0, jc='left') + runs(s)
