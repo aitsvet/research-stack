@@ -11,9 +11,17 @@ Run commands from the research-stack root and use `./.venv/bin/python`.
   directories, citations, manifests, exports, parents and relations depend on it.
 - Never merge peers by recreating or replaying objects through MCP. Creation
   assigns new keys. Never make a key map to paper over that damage.
-- Sync a winning SQLite snapshot whole. `merge_replica.py` classifies state; it
-  does not merge rows.
-- `$SYNC_BACKUP_DIR` (default `.sync/backup`) holds **two separate copies** of
+- Sync a winning SQLite snapshot whole. `merge_replica.py plan` classifies
+  state. The one row-level operation is `merge_replica.py union`, for a
+  conflict in which both peers only *added* objects since the base: it copies
+  the origin, transplants the replica-only items, collections and memberships
+  under their original keys, and refuses unless the result is a fast-forward of
+  both peers. The union is then installed whole on every peer, Zotero stopped.
+- `scripts/empty_trash.py --db <offline copy>` empties the trash the way Zotero
+  does (trashed items with their children, orphaned tags/creators/values) and
+  lists the attachment keys whose `storage/` folders go with it. It runs on a
+  stopped peer's copy; the other peers then install that snapshot whole.
+- `$SYNC_BACKUP_DIR` (default `$HOME/backup/zotero`, outside the checkout) holds **two separate copies** of
   the DB, and they are not interchangeable:
   - `zotero.sqlite` + `storage/` — the library backup proper, the thing you
     restore from;

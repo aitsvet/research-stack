@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Swap the live Zotero DBs with the snapshots from $ZOTERO_HOME/Zotero/.snapshot/
 # and verify. Runs ON THE REPLICA (normally over ssh from sync_library.sh)
-# while its zotero container is stopped. The previous DB is kept as *.prev.
+# while its zotero container is stopped. The previous DB is kept as *.prev only
+# until the check passes; a failed check leaves it for the rollback.
 #
 #   ./scripts/place_snapshot.sh [expected_item_count]
 
@@ -39,3 +40,4 @@ except Exception as e:
     sys.exit(f'{e}; rollback: cp {path}.prev {path}')
 print(f'replica: integrity ok, items: {got}')
 PY
+rm -f "$Z/zotero.sqlite.prev" "$Z/zotero-mcp-vectors.sqlite.prev"

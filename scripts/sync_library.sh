@@ -16,8 +16,8 @@
 #                      replica's ordinary ~/.ssh/config route without -J.
 #   SYNC_SSH_PERSIST   shared SSH connection lifetime (default: 15m).
 #   SYNC_BACKUP_DIR    where the sync keeps its two separate DB copies
-#                      (default: .sync/backup; point it outside the checkout
-#                      in .sync/config.env to survive losing the checkout):
+#                      (default: $HOME/backup/zotero — outside the checkout,
+#                      so a fresh clone still finds the base):
 #                        zotero.sqlite       — the library backup proper
 #                        storage/            — its attachment copy
 #                        replica/            — fetched peer DB (transient)
@@ -48,7 +48,7 @@ RROOT="${SYNC_REPLICA_ROOT:-research-stack}"
 RZH="${SYNC_REPLICA_ZOTERO:-zotero}"
 ZH="${ZOTERO_HOME:-$HOME/zotero}"
 SYNC="$ROOT/.sync"
-BACKUP_DIR="${SYNC_BACKUP_DIR:-$SYNC/backup}"
+BACKUP_DIR="${SYNC_BACKUP_DIR:-$HOME/backup/zotero}"
 REPLICA_DB_DIR="$BACKUP_DIR/replica"   # fetched peer DB, kept beside the backup
 BACKUP_STORAGE="${SYNC_BACKUP_STORAGE:-1}"
 case "$BACKUP_STORAGE" in 0|1) ;; *) echo "SYNC_BACKUP_STORAGE must be 0 or 1" >&2; exit 2 ;; esac

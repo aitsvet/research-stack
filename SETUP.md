@@ -189,8 +189,8 @@ ssh+rsync, no zotero.org account involved.
 All peers may write, but a Zotero object key is durable identity: item, note,
 attachment and collection keys must never be regenerated during a sync.
 `scripts/sync_library.sh` therefore keeps two **separate** copies under
-`$SYNC_BACKUP_DIR` (default `.sync/backup`; point it outside the checkout to
-survive losing it) and permits whole-snapshot fast-forwards only:
+`$SYNC_BACKUP_DIR` (default `$HOME/backup/zotero`, outside the checkout so a
+fresh clone keeps the base) and permits whole-snapshot fast-forwards only:
 
 | Copy | Path under `$SYNC_BACKUP_DIR` | Role |
 |---|---|---|
@@ -224,8 +224,11 @@ Run it ON the origin, once per replica:
 
 No objects are replayed through MCP and no key map is created. A conflict is
 resolved outside this script (manual choice or Zotero native sync), followed
-by another run once the peers agree. `place_snapshot.sh` retains the replaced
-live DB as `zotero.sqlite.prev`. Upgrading from the older layout? Copy the last
+by another run once the peers agree. When both peers only added objects,
+`merge_replica.py union` builds the key-preserving union offline and proves it
+a fast-forward of both; `empty_trash.py` empties the trash in such an offline
+copy. `place_snapshot.sh` keeps the replaced live DB as `zotero.sqlite.prev`
+only until its check passes. Upgrading from the older layout? Copy the last
 common base (formerly `.sync/base/zotero.sqlite`) to
 `$SYNC_BACKUP_DIR/base/zotero.sqlite` once, or the next run finds none and
 correctly refuses to guess a direction.

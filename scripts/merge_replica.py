@@ -21,6 +21,17 @@ whole-snapshot fast-forwards:
 
 Installing the winning SQLite snapshot preserves item, note, attachment, and
 collection keys exactly.  There is deliberately no MCP replay/apply mode.
+
+When both peers only *added* objects since the base (no shared key changed or
+removed), the conflict is a disjoint union, and ``union`` builds it offline:
+
+    merge_replica.py union --origin O.sqlite --replica R.sqlite --base B.sqlite \
+        --out UNION.sqlite
+
+It copies the origin and transplants the replica-only items, collections and
+memberships row by row under their original keys (local integer IDs are
+renumbered), then proves the result is a fast-forward of both peers.  The
+union is installed whole like any winning snapshot.
 """
 
 import argparse
@@ -387,6 +398,149 @@ def build_plan(origin_path, replica_path, base_path=None):
     )
 
 
+# Item rows keyed by itemID, copied for transplanted items. Lookup columns are
+# remapped by value; schema-defined IDs (types, fields, charsets) by name.
+_ITEM_TABLES = (
+    "itemData", "itemCreators", "itemTags", "itemNotes", "itemAttachments",
+    "itemAnnotations", "itemRelations", "deletedItems", "fulltextItems",
+    "fulltextItemWords", "publicationsItems", "retractedItems",
+)
+_LOOKUPS = {  # column -> (table, id column, natural-key columns)
+    "valueID": ("itemDataValues", "valueID", ("value",)),
+    "creatorID": ("creators", "creatorID", ("firstName", "lastName", "fieldMode")),
+    "tagID": ("tags", "tagID", ("name",)),
+    "wordID": ("fulltextWords", "wordID", ("word",)),
+    "predicateID": ("relationPredicates", "predicateID", ("predicate",)),
+    "fieldID": ("fieldsCombined", "fieldID", ("fieldName",)),
+    "creatorTypeID": ("creatorTypes", "creatorTypeID", ("creatorType",)),
+    "charsetID": ("charsets", "charsetID", ("charset",)),
+    "itemTypeID": ("itemTypesCombined", "itemTypeID", ("typeName",)),
+}
+_SCHEMA_DEFINED = {"fieldsCombined", "creatorTypes", "charsets", "itemTypesCombined"}
+
+
+def additive_extras(base, origin, replica):
+    """Replica operations absent from the origin, if the peers are a disjoint union."""
+    origin_delta, replica_delta = _delta(base, origin), _delta(base, replica)
+    shared = origin_delta.keys() & replica_delta.keys()
+    if any(origin_delta[key] != replica_delta[key] for key in shared):
+        raise ValueError("peers changed the same object differently")
+    extra = {key: op for key, op in replica_delta.items() if key not in origin_delta}
+    if any(op[0] != "add" for op in extra.values()):
+        raise ValueError("replica removes or changes objects; not a disjoint union")
+    return extra
+
+
+def union(origin_path, replica_path, base_path, out_path):
+    import shutil
+    origin, replica, base = load(origin_path), load(replica_path), load(base_path)
+    extra = additive_extras(base, origin, replica)
+    items = sorted(key for kind, key, *_ in extra if kind == "item")
+    colls = sorted(key for kind, key, *_ in extra if kind == "collection")
+    members = sorted(tuple(key[1:]) for key in extra if key[0] == "membership")
+    shutil.copyfile(origin_path, out_path)
+    src = sqlite3.connect(f"file:{replica_path}?mode=ro", uri=True)
+    dst = sqlite3.connect(out_path)
+    dst.execute("PRAGMA foreign_keys=ON")
+    lookup_cache = {}
+
+    def remap(column, value):
+        if value is None or column not in _LOOKUPS:
+            return value
+        table, id_col, natural = _LOOKUPS[column]
+        cached = lookup_cache.get((column, value))
+        if cached is not None:
+            return cached
+        row = src.execute(f"SELECT {','.join(natural)} FROM {table} WHERE {id_col}=?", (value,)).fetchone()
+        where = " AND ".join(f"{c} IS ?" for c in natural)
+        found = dst.execute(f"SELECT {id_col} FROM {table} WHERE {where}", row).fetchone()
+        if found:
+            new = found[0]
+        elif table in _SCHEMA_DEFINED:
+            raise ValueError(f"schema mismatch: {table} {row}")
+        else:
+            cur = dst.execute(f"INSERT INTO {table} ({','.join(natural)}) VALUES ({','.join('?' * len(natural))})", row)
+            new = cur.lastrowid
+        lookup_cache[(column, value)] = new
+        return new
+
+    item_ids = {}   # replica itemID -> union itemID, for transplanted items
+    def item_id(replica_id):
+        if replica_id is None:
+            return None
+        if replica_id in item_ids:
+            return item_ids[replica_id]
+        key = src.execute("SELECT key FROM items WHERE itemID=?", (replica_id,)).fetchone()[0]
+        return dst.execute("SELECT itemID FROM items WHERE libraryID=1 AND key=?", (key,)).fetchone()[0]
+
+    coll_ids = {}
+    def collection_id(key):
+        return dst.execute("SELECT collectionID FROM collections WHERE libraryID=1 AND key=?", (key,)).fetchone()[0]
+
+    # Collections first, parents before children.
+    pending = list(colls)
+    while pending:
+        progressed = False
+        for key in list(pending):
+            row = src.execute("SELECT collectionID, collectionName, parentCollectionID, clientDateModified, "
+                              "version, synced FROM collections WHERE libraryID=1 AND key=?", (key,)).fetchone()
+            parent = None
+            if row[2] is not None:
+                parent_key = src.execute("SELECT key FROM collections WHERE collectionID=?", (row[2],)).fetchone()[0]
+                if parent_key in pending:
+                    continue
+                parent = collection_id(parent_key)
+            cur = dst.execute("INSERT INTO collections (collectionName, parentCollectionID, clientDateModified, "
+                              "libraryID, key, version, synced) VALUES (?,?,?,1,?,?,?)",
+                              (row[1], parent, row[3], key, row[4], row[5]))
+            coll_ids[key] = cur.lastrowid
+            pending.remove(key); progressed = True
+        if not progressed:
+            raise ValueError("collection parent cycle")
+
+    # Items: rows of `items` first so parents resolve, then dependent tables.
+    for key in items:
+        row = src.execute("SELECT itemID, itemTypeID, dateAdded, dateModified, clientDateModified, version, synced "
+                          "FROM items WHERE libraryID=1 AND key=?", (key,)).fetchone()
+        cur = dst.execute("INSERT INTO items (itemTypeID, dateAdded, dateModified, clientDateModified, libraryID, "
+                          "key, version, synced) VALUES (?,?,?,?,1,?,?,?)",
+                          (remap("itemTypeID", row[1]), row[2], row[3], row[4], key, row[5], row[6]))
+        item_ids[row[0]] = cur.lastrowid
+    # Parents (notes/attachments) before children for the collection triggers.
+    for table in _ITEM_TABLES:
+        if not _has_table(src, table):
+            continue
+        cols = [r[1] for r in src.execute(f'PRAGMA table_info("{table}")')]
+        rows = src.execute(f'SELECT {",".join(cols)} FROM "{table}" WHERE itemID IN '
+                           f'({",".join("?" * len(item_ids))})', list(item_ids)).fetchall()
+        for row in rows:
+            values = []
+            for col, value in zip(cols, row):
+                if col in ("itemID", "parentItemID"):
+                    value = item_id(value)
+                else:
+                    value = remap(col, value)
+                values.append(value)
+            dst.execute(f'INSERT INTO "{table}" ({",".join(cols)}) VALUES ({",".join("?" * len(cols))})', values)
+    for coll_key, item_key in members:
+        order = src.execute("SELECT ci.orderIndex FROM collectionItems ci JOIN collections c USING(collectionID) "
+                            "JOIN items i USING(itemID) WHERE c.key=? AND i.key=?", (coll_key, item_key)).fetchone()[0]
+        item = dst.execute("SELECT itemID FROM items WHERE libraryID=1 AND key=?", (item_key,)).fetchone()[0]
+        dst.execute("INSERT INTO collectionItems (collectionID, itemID, orderIndex) VALUES (?,?,?)",
+                    (collection_id(coll_key), item, order))
+    dst.commit()
+    problems = dst.execute("PRAGMA foreign_key_check").fetchall()
+    integrity = dst.execute("PRAGMA integrity_check").fetchone()[0]
+    dst.close(); src.close()
+    if problems or integrity != "ok":
+        raise ValueError(f"union failed checks: {integrity}, {problems[:5]}")
+    merged = load(out_path)
+    for name, peer in (("origin", origin), ("replica", replica)):
+        if classify(merged, peer, base)["mode"] not in ("origin_fast_forward", "equal"):
+            raise ValueError(f"union is not a fast-forward of the {name}")
+    return {"items": len(items), "collections": len(colls), "memberships": len(members)}
+
+
 def main():
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -395,8 +549,14 @@ def main():
     plan_parser.add_argument("--replica", required=True)
     plan_parser.add_argument("--base")
     plan_parser.add_argument("--out", required=True)
+    union_parser = sub.add_parser("union")
+    for name in ("--origin", "--replica", "--base", "--out"):
+        union_parser.add_argument(name, required=True)
     args = parser.parse_args()
 
+    if args.command == "union":
+        print("union:", json.dumps(union(args.origin, args.replica, args.base, args.out)))
+        return
     plan = build_plan(args.origin, args.replica, args.base)
     with open(args.out, "w", encoding="utf-8") as handle:
         json.dump(plan, handle, ensure_ascii=False, indent=2)
