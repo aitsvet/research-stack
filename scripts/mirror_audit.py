@@ -67,7 +67,19 @@ def main():
     root = os.path.abspath(a.corpus)
     name = a.name or os.path.basename(root.rstrip('/'))
 
-    db = sqlite3.connect(f'file:{os.path.abspath(a.db)}?mode=ro&immutable=1', uri=True)
+    # Copy the live database (with its WAL) and read the copy: a running Zotero
+    # keeps fresh writes in -wal, which `immutable=1` on the original silently
+    # ignores, and `mode=ro` alone fails with "database is locked" against the
+    # writer's lock. The copy is opened read-only and thrown away.
+    import shutil, tempfile
+    src = os.path.abspath(a.db)
+    tmpdir = tempfile.mkdtemp(prefix='mirror_audit_')
+    snap = os.path.join(tmpdir, 'zotero.sqlite')
+    shutil.copyfile(src, snap)
+    for ext in ('-wal', '-shm'):
+        if os.path.exists(src + ext):
+            shutil.copyfile(src + ext, snap + ext)
+    db = sqlite3.connect(f'file:{snap}?mode=ro', uri=True)
     live = {}      # key -> (itemID, title)
     trashed = set()
     for iid, key, typ, title, gone in db.execute("""
