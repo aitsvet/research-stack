@@ -50,6 +50,15 @@ class MCP:
                 return self._raw({"jsonrpc":"2.0","id":int(time.time()*1000)%10**8,
                     "method":"tools/call","params":{"name":tool,"arguments":args}}, timeout)
             except urllib.error.HTTPError as e:
+                body = b""
+                try: body = e.read()[:400]
+                except Exception: pass
+                # The plugin intermittently answers a well-formed tools/call with
+                # -32700 "Parse error" (the identical payload succeeds on retry),
+                # so that one is transient, not fatal.
+                transient = e.code == 400 and b"-32700" in body
+                if transient and attempt < 2:
+                    time.sleep(delay); continue
                 if e.code == 429 and attempt < 6:
                     ra = e.headers.get("Retry-After")
                     time.sleep(max(float(ra) if ra else delay, delay)); delay = min(delay*2, 40); continue
