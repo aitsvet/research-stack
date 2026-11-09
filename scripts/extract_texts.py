@@ -26,6 +26,7 @@ Usage:
                                                      # manifest lists, by attachment key
   extract_texts.py check <text-dir> [--manifest F]   # completeness audit, exit 1 on failure
   extract_texts.py md <pdf-or-dir> [...] [--out DIR] [--suffix .txt] [--stdout]
+                     [--engine pymupdf4llm|pdftotext]
 
 Items a manifest records under any other `src` (placed by an out-of-band extractor,
 e.g. a .docx converter) are never overwritten by `<collectionKey>` or `refresh`.
@@ -271,6 +272,10 @@ def cmd_md(argv):
                     help="output file suffix (default: .txt)")
     ap.add_argument("--stdout", action="store_true",
                     help="write to stdout instead of files (single PDF)")
+    ap.add_argument("--engine", choices=["pymupdf4llm", "pdftotext"], default="pymupdf4llm",
+                    help="text-layer reader: pymupdf4llm keeps markdown structure but "
+                         "scrambles Arabic word order; pdftotext (poppler) is the one to "
+                         "use for Arabic-script PDFs, at the cost of layout")
     args = ap.parse_args(argv)
 
     targets = []
@@ -302,7 +307,10 @@ def cmd_md(argv):
                     pdf_src = pdf
             else:
                 pdf_src = pdf
-            md = pdf_to_markdown(pdf_src)
+            if args.engine == "pdftotext":
+                md = paginate([_clean(p) for p in _pdftotext_pages(pdf_src)])
+            else:
+                md = pdf_to_markdown(pdf_src)
         except Exception as e:
             print(f"  FAIL {os.path.basename(pdf)}: {e}", file=sys.stderr)
             continue
