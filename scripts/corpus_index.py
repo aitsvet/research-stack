@@ -8,7 +8,9 @@ BM25, cosine over embeddings, and reciprocal-rank fusion of the two.
 
     corpus_index.py build <corpus> [--db F] [--include GLOB] [--model NAME]
                                  [--limit N] [--batch N] [--no-vectors]
-    corpus_index.py search "<query>" [--db F] [-k 8] [--mode hybrid|fts|vec] [--json]
+    corpus_index.py search "<query>" [--db F] [-k 8] [--mode hybrid|fts|vec]
+                                  [--primary KEY] [--support N] [--json] [--context]
+                                  [--rerank MODEL] [--rerank-top N]
     corpus_index.py stats [--db F]
 
 Database default: `<corpus>/.index/corpus.sqlite` (keep it out of git).
@@ -303,6 +305,40 @@ def search_vec(con, q, k, model, dbp=None):
             out.append((cid, r[0], r[1], r[2], score))
     return out
 
+def key_of(path):
+    """Item key a corpus file is named by (`topic/A8NY6TA6_x.md` -> `A8NY6TA6`),
+    or None when the file carries no key."""
+    head = os.path.basename(path).split("_")[0]
+    return head if re.fullmatch(r"[A-Z0-9]{8}", head) else None
+
+def rerank(con, query, hits, model, top=20):
+    """Second pass with a stronger, slower embedder over the fused candidates.
+
+    The index vectors stay cheap (a small fast model); precision at rank 1 is
+    bought here, on 20 chunks per query instead of 100k. Both sides are re-embedded
+    with the same model, so scores are comparable within this call only."""
+    import numpy as np
+    emb = embedder(model)
+    cand = hits[:top]
+    qv = norm(next(iter(emb.embed(prefixed(model, [query], "query")))).astype("float32"))
+    vecs = [norm(v.astype("float32")) for v in emb.embed(prefixed(model, [h[3] for h in cand], "passage"))]
+    scored = [(-float(np.dot(v, qv)), h) for v, h in zip(vecs, cand)]
+    scored.sort(key=lambda x: x[0])
+    return [(h[0], h[1], h[2], h[3], -neg) for neg, h in scored]
+
+def prefer_primary(hits, primary, k, support):
+    """Order hits so the chosen title leads and the rest only supports it.
+
+    QA on this corpus answers from one book; the other titles are context. Hits
+    of `primary` keep their fused order, everything else is appended and capped
+    at `support` (0 = ignore the rest entirely). Without `primary` the list is
+    returned unchanged."""
+    if not primary:
+        return hits[:k]
+    mine = [h for h in hits if key_of(h[1]) == primary]
+    other = [h for h in hits if key_of(h[1]) != primary][:max(support, 0)]
+    return (mine[:k] if support is None else mine[:max(k - len(other), 1)]) + other
+
 def rrf(*lists, k=60):
     score, keep = {}, {}
     for lst in lists:
@@ -329,8 +365,16 @@ def search(a):
         if (h[1], h[2]) in seen:
             continue
         seen.add((h[1], h[2])); hits.append(h)
-        if len(hits) == n:
+        if len(hits) >= n * 3:
             break
+    if a.primary and hits and not any(key_of(h[1]) == a.primary for h in hits):
+        print(f"note: no chunk from the primary title ({a.primary}) matched; "
+              f"the list below is support only", file=sys.stderr)
+    hits = prefer_primary(hits, a.primary, n, a.support)
+    if a.rerank:
+        head = hits[:max(a.rerank_top, n)]
+        tail = hits[len(head):]
+        hits = rerank(con, a.query, head, a.rerank, a.rerank_top) + tail
     if a.context:
         for i, (cid, path, page, text, score) in enumerate(hits, 1):
             body = re.sub(r"\s+", " ", text).strip()
@@ -368,6 +412,16 @@ def main(argv):
     s.add_argument("query"); s.add_argument("--db"); s.add_argument("-k", type=int, default=8)
     s.add_argument("--mode", choices=["hybrid", "fts", "vec"], default="hybrid")
     s.add_argument("--json", action="store_true")
+    s.add_argument("--primary", metavar="KEY",
+                   help="Zotero key of the title to answer from; its hits rank first")
+    s.add_argument("--support", type=int, default=2,
+                   help="how many chunks from the other titles may fill the tail (default 2)")
+    s.add_argument("--rerank", metavar="MODEL",
+                   help="re-score the top candidates with a stronger embedder, e.g. "
+                        "intfloat/multilingual-e5-large or "
+                        "sentence-transformers/paraphrase-multilingual-mpnet-base-v2")
+    s.add_argument("--rerank-top", type=int, default=20,
+                   help="how many fused candidates the reranker sees (default 20)")
     s.add_argument("--context", action="store_true",
                    help="print one prompt-ready block of the hits with citations")
     st = sub.add_parser("stats"); st.add_argument("--db")
