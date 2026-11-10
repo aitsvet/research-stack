@@ -12,3 +12,7 @@ websocket-client==1.9.0
 # Deck pipeline (scripts/deck/): pptx geometry observe/lint + measured layout
 python-pptx==1.0.2
 markdown
+
+# Paragraph-level corpus index: FTS5 is stdlib, vectors come from fastembed (ONNX, CPU).
+# Optional — `corpus_index.py --no-vectors` needs nothing beyond sqlite3.
+fastembed==0.9.1
