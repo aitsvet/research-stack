@@ -33,6 +33,10 @@ PAGE_RE = re.compile(r"^\{(\d+)\}-{48}$", re.M)
 DEFAULT_MODEL = "minishlab/potion-multilingual-128M"
 MAX_CHUNK = 900          # characters of a chunk; paragraphs are merged up to this
 MIN_CHUNK = 60           # shorter paragraphs are dropped (headers, page numbers)
+# Arabic diacritics (harakat) and tatweel: they multiply the token count of a
+# vocalised page without carrying meaning, and they drown the Russian text of a
+# bilingual edition under hundreds of one-letter tokens.
+HARAKAT = re.compile("[\u0640\u064b-\u065f\u0670\u06d6-\u06ed]")
 
 SCHEMA = """
 create table if not exists meta(key text primary key, value text);
@@ -92,6 +96,7 @@ def chunk_page(page_no, body):
     it is not dropped but prepended to the next paragraph, so its words stay
     searchable ("Отношение Пророка к сплетням" is the heading of the chapter
     that answers it)."""
+    body = HARAKAT.sub("", body)
     paras = [p.strip() for p in re.split(r"\n\s*\n", body)]
     chunks, cur, pending = [], "", ""
     for p in paras:
@@ -347,34 +352,51 @@ def rrf(*lists, k=60):
             keep[hit[0]] = hit
     return [keep[cid] for cid in sorted(score, key=lambda c: -score[c])]
 
+def dedupe(hits, limit):
+    """One chunk per page — neighbouring paragraphs of the same page crowd the list."""
+    out, seen = [], set()
+    for h in hits:
+        if (h[1], h[2]) in seen:
+            continue
+        seen.add((h[1], h[2])); out.append(h)
+        if len(out) >= limit:
+            break
+    return out
+
 def search(a):
     dbp = db_path(os.getcwd(), a.db)
     con = open_index(a.db)
     row = con.execute("select value from meta where key='model'").fetchone()
     model = row[0] if row else DEFAULT_MODEL
     n = a.k
+    # A wide candidate pool matters when one title must lead: the base book's best
+    # chunks can sit below the global top-n, and filtering after the fact would
+    # silently drop them.
+    pool = max(n * 6, 120) if a.primary else max(n, 50)
     fts = vec = []
     if a.mode in ("hybrid", "fts"):
-        fts = search_fts(con, a.query, max(n, 50))
+        fts = search_fts(con, a.query, pool)
     if a.mode in ("hybrid", "vec"):
-        vec = search_vec(con, a.query, max(n, 50), model, dbp)
+        vec = search_vec(con, a.query, pool, model, dbp)
     ranked = {"fts": fts, "vec": vec, "hybrid": rrf(fts, vec)}[a.mode]
-    # one chunk per page: neighbouring paragraphs of the same page crowd the list
-    hits, seen = [], set()
-    for h in ranked:
-        if (h[1], h[2]) in seen:
-            continue
-        seen.add((h[1], h[2])); hits.append(h)
-        if len(hits) >= n * 3:
-            break
-    if a.primary and hits and not any(key_of(h[1]) == a.primary for h in hits):
-        print(f"note: no chunk from the primary title ({a.primary}) matched; "
-              f"the list below is support only", file=sys.stderr)
-    hits = prefer_primary(hits, a.primary, n, a.support)
-    if a.rerank:
-        head = hits[:max(a.rerank_top, n)]
-        tail = hits[len(head):]
-        hits = rerank(con, a.query, head, a.rerank, a.rerank_top) + tail
+
+    if a.primary:
+        mine = dedupe([h for h in ranked if key_of(h[1]) == a.primary], n)
+        other = dedupe([h for h in ranked if key_of(h[1]) != a.primary], max(a.support, 0))
+        if mine and a.rerank:
+            mine = rerank(con, a.query, mine, a.rerank, a.rerank_top)
+        if not mine:
+            print(f"note: no chunk from the primary title ({a.primary}) matched "
+                  f"\"{a.query}\"; the list below is support only", file=sys.stderr)
+        hits = mine[:max(n - len(other), 1)] + other
+        hits = dedupe(hits, n)
+    else:
+        hits = dedupe(ranked, n)
+        if a.rerank:
+            head, tail = hits[:max(a.rerank_top, n)], hits[len(hits[:max(a.rerank_top, n)]):]
+            hits = rerank(con, a.query, head, a.rerank, a.rerank_top) + tail
+            hits = dedupe(hits, n)
+
     if a.context:
         for i, (cid, path, page, text, score) in enumerate(hits, 1):
             body = re.sub(r"\s+", " ", text).strip()
