@@ -312,6 +312,9 @@ def main(argv):
     ap.add_argument("--no-texts", action="store_true")
     ap.add_argument("--selftest-query", default="", help="query for the instruction's acceptance table")
     ap.add_argument("--selftest-page", default="", help="expected page for that query")
+    ap.add_argument("--with-reference", action="store_true", default=True,
+                    help="ship corpus_index.py under reference/ (default: yes)")
+    ap.add_argument("--no-reference", dest="with_reference", action="store_false")
     ap.add_argument("--instructions-only", action="store_true",
                     help="ship texts + one INSTRUCTION.md and nothing else: the receiving "
                          "agent builds the FTS index itself from the chunking rules")
@@ -337,6 +340,10 @@ def main(argv):
     if not a.instructions_only:
         for fn in ("corpus_index.py", "shot_ocr.py"):
             shutil.copyfile(os.path.join(here, fn), os.path.join(pack, fn))
+    elif a.with_reference:
+        os.makedirs(os.path.join(pack, "reference"), exist_ok=True)
+        shutil.copyfile(os.path.join(here, "corpus_index.py"),
+                        os.path.join(pack, "reference", "corpus_index.py"))
 
     docs, chunks, chars, pagecounts = count_chunks(pack, texts)
     shipped_index = False

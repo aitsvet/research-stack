@@ -173,7 +173,8 @@ def build(a):
     if row and row[0] != model and not a.no_vectors:
         print(f"  model changed {row[0]} -> {model}: dropping vectors", file=sys.stderr)
         con.execute("delete from vectors")
-    cur.execute("insert or replace into meta values('model', ?)", (model,))
+    cur.execute("insert or replace into meta values('model', ?)",
+                ("" if a.no_vectors else model,))
 
     emb = None if a.no_vectors else embedder(model)
     known = {r[0]: r[1] for r in con.execute("select path, sha256 from docs")}
@@ -234,7 +235,11 @@ def search_fts(con, q, k):
     Пророка к сплетням" matches nothing if one word is missing from the chunk —
     so the terms are OR-ed and ranked by bm25."""
     toks = re.findall(r"\w+", q, re.UNICODE)
-    expr = " OR ".join('"%s"' % t for t in toks) if toks else '""'
+    # Russian is heavily inflected: "милость" never matches "милостью". A prefix
+    # query on the first six characters is the cheap stemming that works without
+    # a dictionary (the contract in qa_pack_instruction.md says the same).
+    expr = " OR ".join(('"%s"*' % t[:6]) if len(t) >= 6 else ('"%s"' % t)
+                       for t in toks) if toks else '""'
     rows = con.execute(
         "select cid, path, page, text, bm25(chunks_fts) as s from chunks_fts "
         "where chunks_fts match ? order by bm25(chunks_fts) limit ?", (expr, k)).fetchall()
@@ -416,6 +421,8 @@ def stats(a):
         "select count(*), coalesce(sum(chunks),0), coalesce(sum(chars),0) from docs").fetchone()
     vecs = con.execute("select count(*), coalesce(sum(dim),0) from vectors").fetchone()
     model = con.execute("select value from meta where key='model'").fetchone()
+    if model and not model[0]:
+        model = None
     db = con.execute("pragma page_count").fetchone()[0] * con.execute("pragma page_size").fetchone()[0]
     print(f"docs: {docs}, chunks: {chunks}, chars: {chars:,}, "
           f"vectors: {vecs[0]} (dim {vecs[1] // max(vecs[0], 1)}), db: {db / 1e6:.1f} MB, "

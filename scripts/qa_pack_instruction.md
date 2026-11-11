@@ -109,6 +109,23 @@ or Arabic script and tesseract visibly garbles it — a VLM sometimes substitute
 look-alike word, and here the OCR text *is* the question, so that silently
 changes what is being asked.
 
+## Reference implementation (non-normative)
+
+`reference/corpus_index.py` is the implementation these rules were tuned against;
+read it when a sentence above is ambiguous, or run it directly. Its pure-lexical
+path is stdlib only — no venv, no model:
+
+```bash
+python3 reference/corpus_index.py build . --only texts --db index/books.sqlite --no-vectors
+python3 reference/corpus_index.py search "запрет ростовщичества" \
+    --db index/books.sqlite --mode fts --primary {primary} -k 3 --context
+```
+
+Dropping `--no-vectors` adds embeddings (`numpy` + `fastembed`) and the hybrid
+ranking; that is the only part that needs a model, and it is optional. The file
+is a 20 KB reference, **not** the contract: if it and this document disagree, this
+document wins — fix the script or say so, do not silently follow it.
+
 ## Acceptance tests
 
 Run these before answering anything:
