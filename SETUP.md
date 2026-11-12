@@ -177,6 +177,13 @@ instead, so the token stays out of the process list.
 
 ## Library sync between peers
 
+**Status: legacy.** Current peer reconciliation uses the Google Drive SQLite
+exports described in `agents-setup/DRIVE.md` § *Merging Zotero DB exports from
+Drive*; the ssh+rsync workflow below is retained for first fill, recovery and
+hosts without Drive access. It is not the everyday merge path and its local
+`base/zotero.sqlite` is not authoritative when a Drive merge has advanced the
+library.
+
 Read `scripts/zotero-sync/SKILL.md` before operating or recovering the sync;
 this section records the architecture and configuration rationale.
 
