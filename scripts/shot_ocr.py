@@ -15,13 +15,15 @@ a single prompt-ready block — the OCR text, then the retrieved chunks with
 `path#page` citations.
 
 OCR engine (`--ocr`): `tesseract` (default; local CPU, ~1 s, best on clean
-on-screen text), `chandra` (a VLM on an OpenAI-compatible endpoint, `CHANDRA_URL`;
-better on photographed book pages, complex layouts and Arabic, but seconds per
-image, needs a GPU box, and it can substitute a word that looks alike — which in
-a retrieval query changes the meaning, so prefer it only when tesseract's text is
-visibly wrong), or `auto` (tesseract when installed, else chandra). The
-screenshot needs one of grim (Wayland), maim/scrot/gnome-screenshot (X11) or
-ImageMagick `import`.
+on-screen text), `indra` (also local CPU and no torch, a fraction of a second,
+a line recogniser that reads photographed and complex pages better than
+tesseract and reports a confidence per line), `chandra` (a VLM on an
+OpenAI-compatible endpoint, `CHANDRA_URL`; best on handwriting, layouts and
+Arabic, but seconds per image, needs a GPU box, and it can substitute a word
+that looks alike — which in a retrieval query changes the meaning, so prefer it
+only when the cheaper engines are visibly wrong), or `auto` (tesseract when
+installed, else indra, else chandra). The screenshot needs one of grim
+(Wayland), maim/scrot/gnome-screenshot (X11) or ImageMagick `import`.
 
 Region defaults to the whole screen. `capture` picks the first backend that
 exists; `--backend` forces one.
@@ -104,17 +106,45 @@ def ocr_chandra(path):
         sys.exit(f"chandra at {url} failed: {type(e).__name__}: {e}")
     return _html_text(data["choices"][0]["message"]["content"])
 
-def ocr(path, lang="rus+eng", psm=6, engine="tesseract"):
-    if engine == "chandra" or (engine == "auto" and not have("tesseract")):
-        return ocr_chandra(path)
+def ocr_indra(path):
+    """One image through Indra OCR: ONNX on the CPU, no endpoint and no GPU."""
+    try:
+        import indra_ocr
+    except ImportError:
+        sys.exit("indra-ocr is not installed for --ocr indra: pip install indra-ocr")
+    conv = indra_ocr.load(threads=min(4, os.cpu_count() or 1))
+    for page in conv.convert(path):
+        # `text` is one line per detected line in reading order, which is what a
+        # retrieval query wants; the markdown adds table pipework we do not need.
+        return (getattr(page, "text", "") or getattr(page, "markdown", "")).strip()
+    return ""
+
+def have_indra():
+    import importlib.util
+    return importlib.util.find_spec("indra_ocr") is not None
+
+def ocr_tesseract(path, lang="rus+eng", psm=6):
     if not have("tesseract"):
         sys.exit("tesseract not installed (apt install tesseract-ocr tesseract-ocr-rus) "
-                 "— or pass --ocr chandra with CHANDRA_URL set")
+                 "— or pass --ocr indra (CPU, no install of a server) or chandra")
     out = subprocess.run(["tesseract", path, "stdout", "-l", lang, "--psm", str(psm)],
                          capture_output=True, text=True)
     if out.returncode != 0:
         sys.exit("tesseract failed: " + out.stderr.strip()[:300])
     return out.stdout
+
+def ocr(path, lang="rus+eng", psm=6, engine="tesseract"):
+    if engine == "chandra":
+        return ocr_chandra(path)
+    if engine == "indra":
+        return ocr_indra(path)
+    if engine == "auto":
+        if have("tesseract"):
+            return ocr_tesseract(path, lang, psm)
+        if have_indra():
+            return ocr_indra(path)
+        return ocr_chandra(path)
+    return ocr_tesseract(path, lang, psm)
 
 def search(text, db, primary, k, extra=None):
     here = os.path.dirname(os.path.abspath(__file__))
@@ -139,11 +169,11 @@ def main(argv):
     c.add_argument("--out", default="/tmp/shot.png"); c.add_argument("--backend", default="auto")
     o = sub.add_parser("ocr"); o.add_argument("image"); o.add_argument("--lang", default="rus+eng")
     o.add_argument("--psm", type=int, default=6); o.add_argument("--region")
-    o.add_argument("--ocr", default="tesseract", choices=["tesseract", "chandra", "auto"])
+    o.add_argument("--ocr", default="tesseract", choices=["tesseract", "indra", "chandra", "auto"])
     a = sub.add_parser("ask"); a.add_argument("--region"); a.add_argument("--image")
     a.add_argument("--primary"); a.add_argument("-k", "--k", type=int, default=3)
     a.add_argument("--db"); a.add_argument("--lang", default="rus+eng")
-    a.add_argument("--ocr", default="tesseract", choices=["tesseract", "chandra", "auto"])
+    a.add_argument("--ocr", default="tesseract", choices=["tesseract", "indra", "chandra", "auto"])
     a.add_argument("--keep", action="store_true", help="keep the screenshot")
     args = ap.parse_args(argv)
 

@@ -161,6 +161,11 @@ talks to the MCP over `urllib`, so it is fully cross-platform.
 Optional: **Poppler** (`pdftotext`) on `PATH`. `extract_texts.py` prefers it and
 falls back to `pymupdf` when absent — a speed/quality choice, not a requirement.
 
+Optional: **`pip install indra-ocr`** for scanned pages. It is the OCR route that
+needs no GPU box, Docker or reachable endpoint, and `scripts/indra.py` then reads
+a scan into the same paginated Markdown on the local CPU. Models download on the
+first run (~76 MB) and cache under `INDRA_OCR_MODEL_DIR`.
+
 **Done when** `python -c "import fitz, bs4, websocket, pptx; print('ok')"` prints
 `ok`.
 

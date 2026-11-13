@@ -6,6 +6,8 @@ HTML export: headings, paragraphs, tables (with colspan flattening), lists,
 inline emphasis, math, code and links. Pure bs4 — no PDF/OCR dependencies, so
 it imports cheaply inside a LibreOffice container.
 """
+import re
+
 from bs4 import BeautifulSoup, NavigableString, Tag
 
 # Sentinel for <br>. A literal "  \n" would be indistinguishable from ordinary
@@ -219,4 +221,22 @@ def html_to_md(html):
     # collapse excessive blank lines
     # rstrip only: the leading pad of a nested list item is its level
     return "\n\n".join(b for b in (x.rstrip() for x in out) if b.strip())
+
+
+_TABLE = re.compile(r"<table\b.*?</table\s*>", re.I | re.S)
+
+
+def tables_to_md(text):
+    """Pipe tables in place of the HTML tables embedded in Markdown.
+
+    A recogniser that answers Markdown still writes tables as HTML (Indra OCR
+    does), and everything downstream that reads pipe tables — `extract_tables.py
+    md`, a reader's editor — would see one unparsed blob. The rest of the text is
+    left untouched: it is already Markdown, and re-parsing it as HTML would
+    collapse its paragraphs.
+    """
+    def one(m):
+        table = BeautifulSoup(m.group(0), "html.parser").find("table")
+        return _table_md(table) if table else m.group(0)
+    return _TABLE.sub(one, text or "")
 

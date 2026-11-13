@@ -17,3 +17,8 @@ segno==1.6.6  # QR codes for deck slides (scripts/deck)
 # Paragraph-level corpus index: FTS5 is stdlib, vectors come from fastembed (ONNX, CPU).
 # Optional — `corpus_index.py --no-vectors` needs nothing beyond sqlite3.
 fastembed==0.9.1
+
+# Optional OCR with no GPU and no server (`indra.py`, `shot_ocr.py --ocr indra`).
+# Deliberately unpinned and not installed by default: it is the fallback for hosts
+# where the Chandra endpoint is not reachable.  pip install indra-ocr
+# (ONNX Runtime, OpenCV, pypdfium2; ~76 MB of models on the first run)
