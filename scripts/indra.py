@@ -118,7 +118,11 @@ def main():
     pages_md, rows, low = [], [], []
     try:
         stream = conv.convert(a.input)
-        for i, page in enumerate(stream):
+        for pos, item in enumerate(stream):
+            # indra_ocr 1.1 yields (page index, Page); earlier builds yielded the
+            # Page alone. Take the index from the tuple so the marks keep the
+            # source page numbers either way.
+            i, page = item if isinstance(item, tuple) else (pos, item)
             # Indra answers Markdown with HTML tables inside it; the corpus stores
             # pipe tables so the table tooling can read them.
             body = (tables_to_md(_field(page, "markdown") or "")).strip()
